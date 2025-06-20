@@ -7,6 +7,7 @@ import {
 } from "react-router-dom";
 import apiService from "./services/apiService";
 import ExamInterface from "./components/ExamInterface";
+import DebugMonitoring from "./components/DebugMonitoring";
 import "./i18n/config";
 
 // Landing Page Component
@@ -2761,6 +2762,16 @@ function ExamPage() {
     { id: "demo-session-1", name: "ข้อสอบ JavaScript Developer", duration: 60 },
     { id: "demo-session-2", name: "ข้อสอบ Python Developer", duration: 90 },
     { id: "demo-session-3", name: "ข้อสอบ React Developer", duration: 75 },
+    {
+      id: "real-session-1",
+      name: "🎯 ระบบตรวจจับการโกง (OpenCV)",
+      duration: 30,
+    },
+    {
+      id: "real-session-2",
+      name: "🤖 ระบบตรวจจับการโกง (YOLO11 Pose)",
+      duration: 30,
+    },
   ]);
 
   return (
@@ -2797,20 +2808,36 @@ function ExamPage() {
                 เวลาในการทำ: {session.duration} นาที
               </p>
             </div>
-            <button
-              style={{
-                padding: "10px 20px",
-                backgroundColor: "#4caf50",
-                color: "white",
-                border: "none",
-                borderRadius: "4px",
-                cursor: "pointer",
-                fontSize: "14px",
-              }}
-              onClick={() => navigate(`/exam/${session.id}`)}
-            >
-              🚀 เริ่มทำการสอบ
-            </button>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button
+                style={{
+                  padding: "10px 20px",
+                  backgroundColor: "#4caf50",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                }}
+                onClick={() => navigate(`/exam/${session.id}`)}
+              >
+                🚀 เริ่มทำการสอบ
+              </button>
+              <button
+                style={{
+                  padding: "10px 20px",
+                  backgroundColor: "#ff9800",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                }}
+                onClick={() => navigate(`/debug/${session.id}`)}
+              >
+                🔬 Debug Mode
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -2946,6 +2973,7 @@ function App() {
         <Route path="/admin/candidates/:id" element={<CandidateDetailPage />} />
         <Route path="/exam" element={<ExamPage />} />
         <Route path="/exam/:sessionId" element={<ExamInterface />} />
+        <Route path="/debug/:sessionId" element={<DebugMonitoring />} />
         <Route path="/exam-completed" element={<ExamCompletedPage />} />
       </Routes>
     </Router>

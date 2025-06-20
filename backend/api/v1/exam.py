@@ -11,6 +11,7 @@ import random
 from core.database import get_db
 from models.exam import ExamSession, ExamTemplate, Candidate, ProctoringLog, Company, Department, Position
 from services.face_detection_lite import face_detection_service
+from services.face_detection_yolo11 import yolo11_pose_service
 from services.google_forms import google_forms_service
 from services.n8n_integration import n8n_service
 from utils.websocket_manager import WebSocketManager
@@ -18,6 +19,13 @@ from utils.websocket_manager import WebSocketManager
 router = APIRouter()
 security = HTTPBearer()
 websocket_manager = WebSocketManager()
+
+def get_detection_service(session_id: str):
+    """Select detection service based on session ID"""
+    if session_id == "real-session-2":
+        return yolo11_pose_service
+    else:
+        return face_detection_service
 
 @router.post("/sessions/{session_id}/start")
 async def start_exam_session(
@@ -69,12 +77,16 @@ async def verify_face_direct(
     """ตรวจสอบใบหน้าแบบ real-time (Direct API)"""
     candidate_id = request_data.get("candidate_id")
     frame_data = request_data.get("frame_data")
+    session_id = request_data.get("session_id", "real-session-1")  # Default to session 1
     
     if not candidate_id or not frame_data:
         raise HTTPException(status_code=400, detail="กรุณาระบุ candidate_id และ frame_data")
     
+    # Select appropriate detection service
+    detection_service = get_detection_service(session_id)
+    
     # ตรวจสอบใบหน้า
-    result = await face_detection_service.verify_face_from_frame(
+    result = await detection_service.verify_face_from_frame(
         candidate_id,
         frame_data
     )
@@ -92,8 +104,11 @@ async def verify_face(
     if not session:
         raise HTTPException(status_code=404, detail="ไม่พบเซสชันการสอบ")
     
+    # Select appropriate detection service
+    detection_service = get_detection_service(session_id)
+    
     # ตรวจสอบใบหน้า
-    result = await face_detection_service.verify_face_from_frame(
+    result = await detection_service.verify_face_from_frame(
         session.candidate_id,
         frame_data.get("frame")
     )

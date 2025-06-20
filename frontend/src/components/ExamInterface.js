@@ -56,6 +56,20 @@ const ExamInterface = () => {
     face_rectangles: [],
     mouth_regions: [],
     frame_dimensions: { width: 640, height: 480 },
+    pose_keypoints: [],
+    pose_analysis: {
+      head_position: "unknown",
+      body_posture: "unknown",
+      hand_positions: "unknown",
+      attention_direction: "unknown",
+    },
+    phone_detection: {
+      phones_detected: false,
+      phone_count: 0,
+      phone_confidence: 0,
+      phone_masks: [],
+      phone_boxes: [],
+    },
   });
   const [violations, setViolations] = useState({
     tabSwitches: 0,
@@ -363,28 +377,413 @@ const ExamInterface = () => {
       ctx.setLineDash([]);
     }
 
-    // Add detection status text
+    // Draw YOLO11 pose keypoints (only for real-session-2)
+    if (
+      sessionId === "real-session-2" &&
+      faceDetectionStatus.pose_keypoints &&
+      faceDetectionStatus.pose_keypoints.length > 0
+    ) {
+      const scaleX = canvas.width / faceDetectionStatus.frame_dimensions.width;
+      const scaleY =
+        canvas.height / faceDetectionStatus.frame_dimensions.height;
+
+      faceDetectionStatus.pose_keypoints.forEach((person, personIndex) => {
+        // Define skeleton connections for YOLO11 pose (17 keypoints) - DISABLED per user request
+        /*
+        const skeleton = [
+          // Face connections
+          [0, 1],
+          [0, 2], // nose to eyes
+          [1, 3],
+          [2, 4], // eyes to ears
+          // Body connections
+          [5, 6], // shoulders
+          [5, 7],
+          [7, 9], // left arm
+          [6, 8],
+          [8, 10], // right arm
+          [5, 11],
+          [6, 12], // shoulders to hips
+          [11, 12], // hips
+          [11, 13],
+          [13, 15], // left leg
+          [12, 14],
+          [14, 16], // right leg
+        ];
+
+        // Create keypoint map for easy access
+        const keypointMap = {};
+        person.forEach((keypoint) => {
+          const keypointNames = [
+            "nose",
+            "left_eye",
+            "right_eye",
+            "left_ear",
+            "right_ear",
+            "left_shoulder",
+            "right_shoulder",
+            "left_elbow",
+            "right_elbow",
+            "left_wrist",
+            "right_wrist",
+            "left_hip",
+            "right_hip",
+            "left_knee",
+            "right_knee",
+            "left_ankle",
+            "right_ankle",
+          ];
+          const index = keypointNames.indexOf(keypoint.name);
+          if (index !== -1) {
+            keypointMap[index] = keypoint;
+          }
+        });
+
+        // Draw skeleton connections first (behind keypoints) - DISABLED per user request
+        ctx.strokeStyle = "#00ff00";
+        ctx.lineWidth = 2;
+        skeleton.forEach(([startIdx, endIdx]) => {
+          const startKp = keypointMap[startIdx];
+          const endKp = keypointMap[endIdx];
+
+          if (
+            startKp &&
+            endKp &&
+            startKp.confidence > 0.3 &&
+            endKp.confidence > 0.3
+          ) {
+            const startX = startKp.x * scaleX;
+            const startY = startKp.y * scaleY;
+            const endX = endKp.x * scaleX;
+            const endY = endKp.y * scaleY;
+
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+          }
+        });
+        */
+
+        // Draw keypoints with enhanced visualization
+        person.forEach((keypoint, kpIndex) => {
+          if (keypoint.confidence > 0.3) {
+            const x = keypoint.x * scaleX;
+            const y = keypoint.y * scaleY;
+
+            // Enhanced color coding for different body parts
+            let color = "#ffffff";
+            let size = 4;
+
+            if (keypoint.name === "nose") {
+              color = "#ff0000"; // Red for nose
+              size = 6;
+            } else if (keypoint.name.includes("eye")) {
+              color = "#ffff00"; // Yellow for eyes
+              size = 5;
+            } else if (keypoint.name.includes("ear")) {
+              color = "#ffa500"; // Orange for ears
+              size = 4;
+            } else if (keypoint.name.includes("shoulder")) {
+              color = "#00ffff"; // Cyan for shoulders
+              size = 5;
+            } else if (keypoint.name.includes("elbow")) {
+              color = "#0080ff"; // Blue for elbows
+              size = 4;
+            } else if (keypoint.name.includes("wrist")) {
+              color = "#8000ff"; // Purple for wrists
+              size = 5;
+            } else if (keypoint.name.includes("hip")) {
+              color = "#ff8000"; // Orange for hips
+              size = 5;
+            } else if (keypoint.name.includes("knee")) {
+              color = "#80ff00"; // Green for knees
+              size = 4;
+            } else if (keypoint.name.includes("ankle")) {
+              color = "#ff0080"; // Pink for ankles
+              size = 4;
+            }
+
+            // Draw keypoint with confidence-based transparency
+            const alpha = Math.min(keypoint.confidence, 1.0);
+            ctx.globalAlpha = alpha;
+
+            // Draw outer circle
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(x, y, size, 0, 2 * Math.PI);
+            ctx.fill();
+
+            // Draw inner circle for high confidence points
+            if (keypoint.confidence > 0.7) {
+              ctx.fillStyle = "#ffffff";
+              ctx.beginPath();
+              ctx.arc(x, y, size - 2, 0, 2 * Math.PI);
+              ctx.fill();
+            }
+
+            ctx.globalAlpha = 1.0; // Reset alpha
+
+            // Draw keypoint labels for important points with better positioning
+            if (
+              keypoint.name === "nose" ||
+              keypoint.name.includes("eye") ||
+              keypoint.name.includes("wrist") ||
+              keypoint.name.includes("shoulder")
+            ) {
+              ctx.fillStyle = color;
+              ctx.font = "10px Arial";
+              ctx.strokeStyle = "#000000";
+              ctx.lineWidth = 2;
+
+              // Add text outline for better visibility
+              ctx.strokeText(keypoint.name.replace("_", " "), x + 8, y - 8);
+              ctx.fillText(keypoint.name.replace("_", " "), x + 8, y - 8);
+            }
+          }
+        });
+
+        // Draw person bounding box
+        if (
+          faceDetectionStatus.face_rectangles &&
+          faceDetectionStatus.face_rectangles[personIndex]
+        ) {
+          const rect = faceDetectionStatus.face_rectangles[personIndex];
+          ctx.strokeStyle = "#00ff00";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          ctx.strokeRect(
+            rect.x * scaleX,
+            rect.y * scaleY,
+            rect.width * scaleX,
+            rect.height * scaleY
+          );
+          ctx.setLineDash([]);
+
+          // Add person label
+          ctx.fillStyle = "#00ff00";
+          ctx.font = "12px Arial";
+          ctx.fillText(
+            `Person ${personIndex + 1}`,
+            rect.x * scaleX,
+            rect.y * scaleY - 5
+          );
+        }
+      });
+
+      // Draw mobile phone detections (segmentation masks and boxes)
+      if (
+        faceDetectionStatus.phone_detection &&
+        faceDetectionStatus.phone_detection.phones_detected
+      ) {
+        // Draw phone bounding boxes
+        faceDetectionStatus.phone_detection.phone_boxes.forEach(
+          (phoneBox, phoneIndex) => {
+            const x = phoneBox.x * scaleX;
+            const y = phoneBox.y * scaleY;
+            const width = phoneBox.width * scaleX;
+            const height = phoneBox.height * scaleY;
+
+            // Draw phone bounding box in red
+            ctx.strokeStyle = "#ff0000";
+            ctx.lineWidth = 3;
+            ctx.setLineDash([10, 5]);
+            ctx.strokeRect(x, y, width, height);
+            ctx.setLineDash([]);
+
+            // Add phone label with confidence
+            ctx.fillStyle = "#ff0000";
+            ctx.font = "bold 14px Arial";
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 2;
+            ctx.strokeText(`📱 Phone ${phoneIndex + 1}`, x, y - 8);
+            ctx.fillText(`📱 Phone ${phoneIndex + 1}`, x, y - 8);
+
+            // Add confidence score
+            ctx.font = "12px Arial";
+            ctx.fillStyle = "#ff4444";
+            ctx.fillText(
+              `${Math.round(phoneBox.confidence * 100)}%`,
+              x,
+              y - 25
+            );
+          }
+        );
+
+        // Draw segmentation masks if available
+        if (
+          faceDetectionStatus.phone_detection.phone_masks &&
+          faceDetectionStatus.phone_detection.phone_masks.length > 0
+        ) {
+          faceDetectionStatus.phone_detection.phone_masks.forEach(
+            (maskData, maskIndex) => {
+              if (maskData.contours && maskData.contours.length > 0) {
+                // Draw segmentation mask outline
+                ctx.strokeStyle = "#ff6600";
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 3]);
+
+                ctx.beginPath();
+                for (let i = 0; i < maskData.contours.length; i += 2) {
+                  const x = maskData.contours[i] * scaleX;
+                  const y = maskData.contours[i + 1] * scaleY;
+
+                  if (i === 0) {
+                    ctx.moveTo(x, y);
+                  } else {
+                    ctx.lineTo(x, y);
+                  }
+                }
+                ctx.closePath();
+                ctx.stroke();
+
+                // Fill with semi-transparent red
+                ctx.fillStyle = "rgba(255, 0, 0, 0.2)";
+                ctx.fill();
+
+                ctx.setLineDash([]);
+              }
+            }
+          );
+        }
+      }
+    }
+
+    // Add detection status text with enhanced YOLO11 information
     ctx.fillStyle = faceDetectionStatus.detected ? "#00ff00" : "#ff0000";
     ctx.font = "14px Arial";
-    ctx.fillText(
-      `Faces: ${
-        faceDetectionStatus.face_rectangles.length
-      } | Confidence: ${Math.round(
-        (faceDetectionStatus.confidence || 0) * 100
-      )}%`,
-      10,
-      25
-    );
 
-    // Add suspicious activities
+    if (sessionId === "real-session-2") {
+      // YOLO11 specific status
+      ctx.fillText(
+        `🤖 YOLO11: ${
+          faceDetectionStatus.face_rectangles.length
+        } person(s) | Confidence: ${Math.round(
+          (faceDetectionStatus.confidence || 0) * 100
+        )}%`,
+        10,
+        25
+      );
+
+      // Add pose analysis summary
+      if (faceDetectionStatus.pose_analysis) {
+        ctx.fillStyle = "#00ffff";
+        ctx.font = "12px Arial";
+        ctx.fillText(
+          `Head: ${
+            faceDetectionStatus.pose_analysis.head_position || "unknown"
+          } | ` +
+            `Posture: ${
+              faceDetectionStatus.pose_analysis.body_posture || "unknown"
+            }`,
+          10,
+          45
+        );
+        ctx.fillText(
+          `Hands: ${
+            faceDetectionStatus.pose_analysis.hand_positions || "unknown"
+          } | ` +
+            `Attention: ${
+              faceDetectionStatus.pose_analysis.attention_direction || "unknown"
+            }`,
+          10,
+          60
+        );
+      }
+
+      // Add keypoint count
+      if (
+        faceDetectionStatus.pose_keypoints &&
+        faceDetectionStatus.pose_keypoints.length > 0
+      ) {
+        ctx.fillStyle = "#ffff00";
+        ctx.font = "11px Arial";
+        const totalKeypoints =
+          faceDetectionStatus.pose_keypoints[0]?.length || 0;
+        const highConfidenceKp =
+          faceDetectionStatus.pose_keypoints[0]?.filter(
+            (kp) => kp.confidence > 0.7
+          ).length || 0;
+        ctx.fillText(
+          `🔗 Keypoints: ${highConfidenceKp}/${totalKeypoints} (high confidence)`,
+          10,
+          75
+        );
+      }
+
+      // Add phone detection status
+      if (faceDetectionStatus.phone_detection) {
+        ctx.fillStyle = faceDetectionStatus.phone_detection.phones_detected
+          ? "#ff0000"
+          : "#00ff00";
+        ctx.font = "12px Arial";
+        ctx.fillText(
+          `📱 Phones: ${faceDetectionStatus.phone_detection.phone_count} detected | ` +
+            `Confidence: ${Math.round(
+              (faceDetectionStatus.phone_detection.phone_confidence || 0) * 100
+            )}%`,
+          10,
+          90
+        );
+      }
+    } else {
+      // OpenCV specific status
+      ctx.fillText(
+        `👁️ OpenCV: ${
+          faceDetectionStatus.face_rectangles.length
+        } face(s) | Confidence: ${Math.round(
+          (faceDetectionStatus.confidence || 0) * 100
+        )}%`,
+        10,
+        25
+      );
+    }
+
+    // Add suspicious activities with better positioning
     if (
       faceDetectionStatus.suspicious &&
       faceDetectionStatus.suspicious.length > 0
     ) {
       ctx.fillStyle = "#ff8800";
       ctx.font = "12px Arial";
+      const startY = sessionId === "real-session-2" ? 95 : 45;
       faceDetectionStatus.suspicious.forEach((activity, index) => {
-        ctx.fillText(`⚠️ ${activity}`, 10, 45 + index * 15);
+        ctx.fillText(
+          `⚠️ ${activity.replace("_", " ").toUpperCase()}`,
+          10,
+          startY + index * 15
+        );
+      });
+    }
+
+    // Add legend for YOLO11 keypoint colors (bottom right)
+    if (
+      sessionId === "real-session-2" &&
+      faceDetectionStatus.pose_keypoints &&
+      faceDetectionStatus.pose_keypoints.length > 0
+    ) {
+      const legendX = canvas.width - 180;
+      const legendY = canvas.height - 120;
+
+      // Semi-transparent background for legend
+      ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+      ctx.fillRect(legendX - 5, legendY - 15, 175, 110);
+
+      ctx.font = "10px Arial";
+      const legendItems = [
+        { color: "#ff0000", text: "🔴 Nose" },
+        { color: "#ffff00", text: "🟡 Eyes" },
+        { color: "#ffa500", text: "🟠 Ears" },
+        { color: "#00ffff", text: "🔵 Shoulders" },
+        { color: "#8000ff", text: "🟣 Wrists" },
+        { color: "#ff8000", text: "🟠 Hips" },
+        { color: "#80ff00", text: "🟢 Knees" },
+        { color: "#ff0080", text: "🔴 Ankles" },
+      ];
+
+      legendItems.forEach((item, index) => {
+        ctx.fillStyle = item.color;
+        ctx.fillText(item.text, legendX, legendY + index * 12);
       });
     }
   }, [faceDetectionStatus]);
@@ -431,6 +830,7 @@ const ExamInterface = () => {
               body: JSON.stringify({
                 candidate_id: examData?.candidate_id || 1,
                 frame_data: imageSrc,
+                session_id: sessionId, // Pass session ID to select detection service
               }),
             });
 
@@ -451,15 +851,88 @@ const ExamInterface = () => {
                 width: 640,
                 height: 480,
               },
+              pose_keypoints: result.pose_keypoints || [],
+              pose_analysis: result.pose_analysis || {
+                head_position: "unknown",
+                body_posture: "unknown",
+                hand_positions: "unknown",
+                attention_direction: "unknown",
+              },
+              phone_detection: result.phone_detection || {
+                phones_detected: false,
+                phone_count: 0,
+                phone_confidence: 0,
+                phone_masks: [],
+                phone_boxes: [],
+              },
             });
 
-            console.log(
-              `🎯 [OPENCV] Face detection: ${
-                result.face_detected ? "Detected" : "Not detected"
-              } | Faces: ${result.num_faces || 0} | Direction: ${
-                result.face_direction || "Unknown"
-              } | Confidence: ${Math.round((result.confidence || 0) * 100)}%`
-            );
+            // Enhanced logging based on detection service
+            if (sessionId === "real-session-2") {
+              // YOLO11 specific logging
+              console.log(
+                `🤖 [YOLO11] Pose detection: ${
+                  result.face_detected ? "Person Detected" : "No Person"
+                } | Persons: ${
+                  result.face_count || 0
+                } | Confidence: ${Math.round((result.confidence || 0) * 100)}%`
+              );
+
+              // Log pose analysis details
+              if (result.pose_analysis) {
+                console.log(
+                  `🎯 [YOLO11] Pose Analysis - Head: ${result.pose_analysis.head_position} | ` +
+                    `Posture: ${result.pose_analysis.body_posture} | ` +
+                    `Hands: ${result.pose_analysis.hand_positions} | ` +
+                    `Attention: ${result.pose_analysis.attention_direction}`
+                );
+              }
+
+              // Log keypoint information
+              if (result.pose_keypoints && result.pose_keypoints.length > 0) {
+                const totalKp = result.pose_keypoints[0]?.length || 0;
+                const highConfKp =
+                  result.pose_keypoints[0]?.filter((kp) => kp.confidence > 0.7)
+                    .length || 0;
+                console.log(
+                  `🔗 [YOLO11] Keypoints: ${highConfKp}/${totalKp} high confidence | ` +
+                    `Persons detected: ${result.pose_keypoints.length}`
+                );
+              }
+
+              // Log phone detection information
+              if (result.phone_detection) {
+                console.log(
+                  `📱 [YOLO11] Phone Detection: ${
+                    result.phone_detection.phones_detected ? "DETECTED" : "None"
+                  } | ` +
+                    `Count: ${result.phone_detection.phone_count} | ` +
+                    `Confidence: ${Math.round(
+                      (result.phone_detection.phone_confidence || 0) * 100
+                    )}%`
+                );
+
+                if (result.phone_detection.phones_detected) {
+                  console.log(
+                    `🎯 [YOLO11] Phone Segmentation: ${
+                      result.phone_detection.phone_masks?.length || 0
+                    } masks | ` +
+                      `${
+                        result.phone_detection.phone_boxes?.length || 0
+                      } bounding boxes`
+                  );
+                }
+              }
+            } else {
+              // OpenCV specific logging
+              console.log(
+                `🎯 [OPENCV] Face detection: ${
+                  result.face_detected ? "Detected" : "Not detected"
+                } | Faces: ${result.num_faces || 0} | Direction: ${
+                  result.face_direction || "Unknown"
+                } | Confidence: ${Math.round((result.confidence || 0) * 100)}%`
+              );
+            }
 
             // Show success notification for real detection
             if (result.face_detected) {
@@ -468,46 +941,114 @@ const ExamInterface = () => {
               );
             }
 
-            // Log suspicious activities - Updated for OpenCV system
+            // Log suspicious activities - Enhanced for both systems
             if (
               result.suspicious_activity &&
               result.suspicious_activity.length > 0
             ) {
               result.suspicious_activity.forEach((activity) => {
-                switch (activity) {
-                  case "head_turned_away":
-                    console.warn(
-                      "🔄 [OPENCV] หันหน้าไปทางอื่น - Head turned away"
-                    );
-                    break;
-                  case "digital_device_detected":
-                    console.warn(
-                      "📱 [OPENCV] อุปกรณ์ดิจิทัลตรวจพบ - Digital device detected"
-                    );
-                    break;
-
-                  case "prolonged_absence_detected":
-                    console.warn(
-                      "👻 [OPENCV] หายไปนานเกินไป - Prolonged absence detected"
-                    );
-                    break;
-                  default:
-                    console.warn(
-                      `⚠️ [OPENCV] กิจกรรมน่าสงสัย - Suspicious activity: ${activity}`
-                    );
+                if (sessionId === "real-session-2") {
+                  // YOLO11 specific suspicious activity logging
+                  switch (activity) {
+                    case "head_down_detected":
+                      console.warn(
+                        "🔽 [YOLO11] หัวก้มลง - Head looking down detected"
+                      );
+                      break;
+                    case "looking_away_detected":
+                      console.warn(
+                        "👀 [YOLO11] มองไปที่อื่น - Looking away detected"
+                      );
+                      break;
+                    case "hand_near_face_detected":
+                      console.warn(
+                        "✋ [YOLO11] มือใกล้หน้า - Hand near face detected"
+                      );
+                      break;
+                    case "suspicious_posture_detected":
+                      console.warn(
+                        "🏃 [YOLO11] ท่าทางน่าสงสัย - Suspicious posture detected"
+                      );
+                      break;
+                    case "attention_diverted":
+                      console.warn(
+                        "🎯 [YOLO11] สมาธิเสียโฟกัส - Attention diverted"
+                      );
+                      break;
+                    case "prolonged_absence_detected":
+                      console.warn(
+                        "👻 [YOLO11] หายไปนานเกินไป - Prolonged absence detected"
+                      );
+                      break;
+                    case "mobile_phone_detected":
+                      console.warn(
+                        "📱 [YOLO11] โทรศัพท์มือถือตรวจพบ - Mobile phone detected"
+                      );
+                      break;
+                    case "phone_usage_suspected":
+                      console.warn(
+                        "📞 [YOLO11] สงสัยใช้โทรศัพท์ - Phone usage suspected"
+                      );
+                      break;
+                    case "confirmed_phone_usage":
+                      console.warn(
+                        "🚨 [YOLO11] ยืนยันการใช้โทรศัพท์ - Confirmed phone usage"
+                      );
+                      break;
+                    default:
+                      console.warn(
+                        `⚠️ [YOLO11] กิจกรรมน่าสงสัย - Suspicious activity: ${activity}`
+                      );
+                  }
+                } else {
+                  // OpenCV specific suspicious activity logging
+                  switch (activity) {
+                    case "head_turned_away":
+                      console.warn(
+                        "🔄 [OPENCV] หันหน้าไปทางอื่น - Head turned away"
+                      );
+                      break;
+                    case "digital_device_detected":
+                      console.warn(
+                        "📱 [OPENCV] อุปกรณ์ดิจิทัลตรวจพบ - Digital device detected"
+                      );
+                      break;
+                    case "prolonged_absence_detected":
+                      console.warn(
+                        "👻 [OPENCV] หายไปนานเกินไป - Prolonged absence detected"
+                      );
+                      break;
+                    default:
+                      console.warn(
+                        `⚠️ [OPENCV] กิจกรรมน่าสงสัย - Suspicious activity: ${activity}`
+                      );
+                  }
                 }
               });
 
-              // Log สำหรับ n8n workflow และ OpenCV analysis
-              console.log("📊 [OPENCV] Detection Summary:", {
-                activities: result.suspicious_activity,
-                num_faces: result.num_faces,
-                face_direction: result.face_direction,
-                analysis_type: result.analysis_type,
-                timestamp: new Date().toISOString(),
-                session_id: sessionId,
-                confidence: result.confidence,
-              });
+              // Enhanced detection summary logging
+              if (sessionId === "real-session-2") {
+                console.log("📊 [YOLO11] Pose Detection Summary:", {
+                  activities: result.suspicious_activity,
+                  num_persons: result.face_count,
+                  pose_analysis: result.pose_analysis,
+                  keypoints_detected: result.pose_keypoints?.length || 0,
+                  analysis_type: "yolo11_pose",
+                  timestamp: new Date().toISOString(),
+                  session_id: sessionId,
+                  confidence: result.confidence,
+                });
+              } else {
+                console.log("📊 [OPENCV] Detection Summary:", {
+                  activities: result.suspicious_activity,
+                  num_faces: result.num_faces,
+                  face_direction: result.face_direction,
+                  analysis_type: result.analysis_type,
+                  timestamp: new Date().toISOString(),
+                  session_id: sessionId,
+                  confidence: result.confidence,
+                });
+              }
             }
 
             // Note: WebSocket disabled for real sessions to avoid 404 errors
@@ -1049,6 +1590,289 @@ const ExamInterface = () => {
                   </Typography>
                 )}
               </Box>
+
+              {/* YOLO11 Pose Analysis Panel (only for real-session-2) */}
+              {sessionId === "real-session-2" && (
+                <Box
+                  sx={{
+                    mb: 2,
+                    p: 2,
+                    border: "1px solid #e0e0e0",
+                    borderRadius: 2,
+                    bgcolor: "#f8f9fa",
+                  }}
+                >
+                  <Typography
+                    variant="body2"
+                    gutterBottom
+                    color="secondary"
+                    sx={{ fontWeight: "bold" }}
+                  >
+                    🤖 [YOLO11] Advanced Pose Analysis
+                  </Typography>
+
+                  {/* Main Analysis Row */}
+                  <Box
+                    sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 1 }}
+                  >
+                    <Chip
+                      size="small"
+                      label={`👤 Head: ${
+                        faceDetectionStatus.pose_analysis?.head_position ||
+                        "unknown"
+                      }`}
+                      color={
+                        faceDetectionStatus.pose_analysis?.head_position ===
+                        "normal"
+                          ? "success"
+                          : faceDetectionStatus.pose_analysis?.head_position ===
+                            "looking_down"
+                          ? "error"
+                          : faceDetectionStatus.pose_analysis?.head_position ===
+                            "looking_up"
+                          ? "warning"
+                          : "default"
+                      }
+                      variant="outlined"
+                    />
+                    <Chip
+                      size="small"
+                      label={`🏃 Posture: ${
+                        faceDetectionStatus.pose_analysis?.body_posture ||
+                        "unknown"
+                      }`}
+                      color={
+                        faceDetectionStatus.pose_analysis?.body_posture ===
+                        "upright"
+                          ? "success"
+                          : faceDetectionStatus.pose_analysis?.body_posture ===
+                            "leaning_forward"
+                          ? "warning"
+                          : faceDetectionStatus.pose_analysis?.body_posture ===
+                            "slouching"
+                          ? "error"
+                          : "default"
+                      }
+                      variant="outlined"
+                    />
+                  </Box>
+
+                  {/* Secondary Analysis Row */}
+                  <Box
+                    sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 1 }}
+                  >
+                    <Chip
+                      size="small"
+                      label={`✋ Hands: ${
+                        faceDetectionStatus.pose_analysis?.hand_positions ||
+                        "unknown"
+                      }`}
+                      color={
+                        faceDetectionStatus.pose_analysis?.hand_positions ===
+                        "normal"
+                          ? "success"
+                          : faceDetectionStatus.pose_analysis
+                              ?.hand_positions === "hand_near_face"
+                          ? "warning"
+                          : faceDetectionStatus.pose_analysis
+                              ?.hand_positions === "hands_raised"
+                          ? "info"
+                          : "default"
+                      }
+                      variant="outlined"
+                    />
+                    <Chip
+                      size="small"
+                      label={`👀 Attention: ${
+                        faceDetectionStatus.pose_analysis
+                          ?.attention_direction || "unknown"
+                      }`}
+                      color={
+                        faceDetectionStatus.pose_analysis
+                          ?.attention_direction === "forward"
+                          ? "success"
+                          : faceDetectionStatus.pose_analysis?.attention_direction?.includes(
+                              "looking_left"
+                            )
+                          ? "warning"
+                          : faceDetectionStatus.pose_analysis?.attention_direction?.includes(
+                              "looking_right"
+                            )
+                          ? "warning"
+                          : "default"
+                      }
+                      variant="outlined"
+                    />
+                  </Box>
+
+                  {/* Detailed Keypoint Information */}
+                  <Box
+                    sx={{ mt: 1, p: 1, bgcolor: "#ffffff", borderRadius: 1 }}
+                  >
+                    <Typography
+                      variant="caption"
+                      color="info.main"
+                      display="block"
+                    >
+                      🔗 Keypoints:{" "}
+                      {faceDetectionStatus.pose_keypoints?.length > 0
+                        ? `${faceDetectionStatus.pose_keypoints.length} person(s) detected`
+                        : "0 detected"}
+                    </Typography>
+
+                    {faceDetectionStatus.pose_keypoints?.length > 0 && (
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        display="block"
+                      >
+                        📊 Points per person:{" "}
+                        {faceDetectionStatus.pose_keypoints[0]?.length || 0}/17
+                        keypoints
+                      </Typography>
+                    )}
+
+                    {/* High-confidence keypoints display */}
+                    {faceDetectionStatus.pose_keypoints?.length > 0 &&
+                      faceDetectionStatus.pose_keypoints[0]?.length > 0 && (
+                        <Box sx={{ mt: 0.5 }}>
+                          <Typography
+                            variant="caption"
+                            color="success.main"
+                            display="block"
+                          >
+                            🎯 High Confidence Keypoints:{" "}
+                            {
+                              faceDetectionStatus.pose_keypoints[0].filter(
+                                (kp) => kp.confidence > 0.7
+                              ).length
+                            }
+                            /17
+                          </Typography>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              gap: 0.25,
+                              mt: 0.5,
+                            }}
+                          >
+                            {faceDetectionStatus.pose_keypoints[0]
+                              .filter((kp) => kp.confidence > 0.7)
+                              .slice(0, 8) // Show only first 8 to avoid clutter
+                              .map((kp, idx) => (
+                                <Chip
+                                  key={idx}
+                                  size="small"
+                                  label={`${kp.name.replace(
+                                    "_",
+                                    " "
+                                  )}: ${Math.round(kp.confidence * 100)}%`}
+                                  variant="outlined"
+                                  sx={{ fontSize: "10px", height: "20px" }}
+                                  color="success"
+                                />
+                              ))}
+                          </Box>
+                        </Box>
+                      )}
+                  </Box>
+
+                  {/* Mobile Phone Detection Panel */}
+                  <Box
+                    sx={{ mt: 1, p: 1, bgcolor: "#ffffff", borderRadius: 1 }}
+                  >
+                    <Typography
+                      variant="caption"
+                      color="secondary.main"
+                      display="block"
+                      sx={{ fontWeight: "bold" }}
+                    >
+                      📱 Mobile Phone Detection (Segmentation)
+                    </Typography>
+
+                    <Box
+                      sx={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 0.5,
+                        mt: 0.5,
+                      }}
+                    >
+                      <Chip
+                        size="small"
+                        label={`Phones: ${
+                          faceDetectionStatus.phone_detection?.phone_count || 0
+                        }`}
+                        color={
+                          faceDetectionStatus.phone_detection?.phones_detected
+                            ? "error"
+                            : "success"
+                        }
+                        variant="outlined"
+                      />
+                      <Chip
+                        size="small"
+                        label={`Confidence: ${Math.round(
+                          (faceDetectionStatus.phone_detection
+                            ?.phone_confidence || 0) * 100
+                        )}%`}
+                        color={
+                          faceDetectionStatus.phone_detection
+                            ?.phone_confidence > 0.5
+                            ? "error"
+                            : "default"
+                        }
+                        variant="outlined"
+                      />
+                    </Box>
+
+                    {faceDetectionStatus.phone_detection?.phones_detected && (
+                      <Typography
+                        variant="caption"
+                        color="error.main"
+                        display="block"
+                        sx={{ mt: 0.5 }}
+                      >
+                        🚨 Mobile phone detected with pixel-level segmentation!
+                      </Typography>
+                    )}
+                  </Box>
+
+                  {/* Suspicious Activity Alert */}
+                  {faceDetectionStatus.suspicious &&
+                    faceDetectionStatus.suspicious.length > 0 && (
+                      <Box
+                        sx={{
+                          mt: 1,
+                          p: 1,
+                          bgcolor: "#fff3e0",
+                          borderRadius: 1,
+                          border: "1px solid #ffb74d",
+                        }}
+                      >
+                        <Typography
+                          variant="caption"
+                          color="warning.main"
+                          display="block"
+                          sx={{ fontWeight: "bold" }}
+                        >
+                          ⚠️ Suspicious Activities Detected:
+                        </Typography>
+                        {faceDetectionStatus.suspicious.map((activity, idx) => (
+                          <Typography
+                            key={idx}
+                            variant="caption"
+                            color="warning.dark"
+                            display="block"
+                          >
+                            • {activity.replace("_", " ").toUpperCase()}
+                          </Typography>
+                        ))}
+                      </Box>
+                    )}
+                </Box>
+              )}
 
               {/* Browser Activities */}
               <Box>
