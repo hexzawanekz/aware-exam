@@ -1,0 +1,281 @@
+{
+    "name": "Novel to Video",
+    "nodes": [
+        {
+            "parameters": {
+                "fields": {
+                    "novelContent": ""
+                }
+            },
+            "type": "n8n-nodes-base.manualTrigger",
+            "name": "Input Novel Content",
+            "position": [
+                0,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=YOUR_API_KEY",
+                "sendBody": true,
+                "jsonBody": {
+                    "contents": [
+                        {
+                            "parts": [
+                                {
+                                    "text": "Write a video script based on this novel content: {{ $json.novelContent }}"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "name": "Generate Script (Gemini)",
+            "position": [
+                200,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://texttospeech.googleapis.com/v1/text:synthesize?key=YOUR_API_KEY",
+                "sendBody": true,
+                "jsonBody": {
+                    "input": {
+                        "text": "={{ $json.script }}"
+                    },
+                    "voice": {
+                        "languageCode": "en-US",
+                        "name": "en-US-Wavenet-D"
+                    },
+                    "audioConfig": {
+                        "audioEncoding": "MP3"
+                    }
+                }
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "name": "Text to Speech (Google)",
+            "position": [
+                400,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://host.docker.internal:7860/sdapi/v1/txt2img",
+                "sendBody": true,
+                "jsonBody": {
+                    "prompt": "={{ $json.script }}",
+                    "steps": 30,
+                    "width": 512,
+                    "height": 768
+                }
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "name": "Generate Image (Stable Diffusion)",
+            "position": [
+                600,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "command": "ffmpeg -framerate 1 -i image_%d.png -c:v libx264 -r 30 -pix_fmt yuv420p output.mp4"
+            },
+            "type": "n8n-nodes-base.executeCommand",
+            "name": "Images to Video (ffmpeg)",
+            "position": [
+                800,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "command": "ffmpeg -i output.mp4 -i output.mp3 -c:v copy -c:a aac final_video.mp4"
+            },
+            "type": "n8n-nodes-base.executeCommand",
+            "name": "Combine Video & Audio (ffmpeg)",
+            "position": [
+                1000,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=YOUR_API_KEY",
+                "sendBody": true,
+                "jsonBody": {
+                    "contents": [
+                        {
+                            "parts": [
+                                {
+                                    "text": "Generate a catchy title, short description, and 5 hashtags for this video: {{ $json.script }}"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "name": "Generate Title & Description (Gemini)",
+            "position": [
+                1200,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "video": "final_video.mp4",
+                "title": "={{ $json.title }}",
+                "description": "={{ $json.description }}",
+                "tags": "={{ $json.hashtags }}"
+            },
+            "type": "n8n-nodes-base.youtube",
+            "name": "Upload to YouTube",
+            "position": [
+                1400,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "append",
+                "columns": {
+                    "title": "={{ $json.title }}",
+                    "description": "={{ $json.description }}",
+                    "hashtags": "={{ $json.hashtags }}",
+                    "status": "UPLOADED"
+                }
+            },
+            "type": "n8n-nodes-base.googleSheets",
+            "name": "Log to Google Sheets",
+            "position": [
+                1600,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "amount": 30,
+                "unit": "seconds"
+            },
+            "type": "n8n-nodes-base.wait",
+            "name": "Wait (API Cooldown)",
+            "position": [
+                1800,
+                0
+            ]
+        }
+    ],
+    "connections": {
+        "Input Novel Content": {
+            "main": [
+                [
+                    {
+                        "node": "Generate Script (Gemini)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Generate Script (Gemini)": {
+            "main": [
+                [
+                    {
+                        "node": "Text to Speech (Google)",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Generate Image (Stable Diffusion)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Text to Speech (Google)": {
+            "main": [
+                [
+                    {
+                        "node": "Images to Video (ffmpeg)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Generate Image (Stable Diffusion)": {
+            "main": [
+                [
+                    {
+                        "node": "Images to Video (ffmpeg)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Images to Video (ffmpeg)": {
+            "main": [
+                [
+                    {
+                        "node": "Combine Video & Audio (ffmpeg)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Combine Video & Audio (ffmpeg)": {
+            "main": [
+                [
+                    {
+                        "node": "Generate Title & Description (Gemini)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Generate Title & Description (Gemini)": {
+            "main": [
+                [
+                    {
+                        "node": "Upload to YouTube",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Upload to YouTube": {
+            "main": [
+                [
+                    {
+                        "node": "Log to Google Sheets",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Log to Google Sheets": {
+            "main": [
+                [
+                    {
+                        "node": "Wait (API Cooldown)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

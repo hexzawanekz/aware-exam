@@ -1,0 +1,138 @@
+{
+    "name": "Agent Memory Retrieval",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "search-memory",
+                "responseMode": "responseNode"
+            },
+            "id": "webhook-2",
+            "name": "Webhook - Search Memory",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                240,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "model": "text-embedding-ada-002",
+                "input": "={{ $json.query }}"
+            },
+            "id": "openai-2",
+            "name": "OpenAI Query Embeddings",
+            "type": "n8n-nodes-base.openAi",
+            "typeVersion": 1,
+            "position": [
+                460,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "http://qdrant:6333/collections/agent_memory/points/search",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "requestMethod": "POST",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyContentType": "json",
+                "jsonBody": "{\n  \"vector\": {{ $json.data[0].embedding }},\n  \"limit\": {{ $('Webhook - Search Memory').item.json.limit || 5 }},\n  \"with_payload\": true,\n  \"filter\": {\n    \"must\": [\n      {\n        \"key\": \"user_id\",\n        \"match\": {\n          \"value\": \"{{ $('Webhook - Search Memory').item.json.user_id || 'default' }}\"\n        }\n      }\n    ]\n  }\n}"
+            },
+            "id": "http-2",
+            "name": "Search in Qdrant",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                680,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Process search results\nconst searchResults = $input.all()[0].json.result;\nconst memories = searchResults.map(result => ({\n  content: result.payload.content,\n  timestamp: result.payload.timestamp,\n  type: result.payload.type,\n  score: result.score,\n  session_id: result.payload.session_id\n}));\n\n// Build context from relevant memories\nconst context = memories\n  .filter(memory => memory.score > 0.8) // Only high-confidence matches\n  .map(memory => `[${memory.timestamp}] ${memory.content}`)\n  .join('\\n');\n\nreturn {\n  memories: memories,\n  context: context,\n  query: $('Webhook - Search Memory').item.json.query,\n  found_count: memories.length\n};"
+            },
+            "id": "code-1",
+            "name": "Process Results",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                900,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "{\n  \"success\": true,\n  \"query\": \"{{ $json.query }}\",\n  \"found_count\": {{ $json.found_count }},\n  \"context\": \"{{ $json.context }}\",\n  \"memories\": {{ JSON.stringify($json.memories) }}\n}"
+            },
+            "id": "respond-2",
+            "name": "Response",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                1120,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook - Search Memory": {
+            "main": [
+                [
+                    {
+                        "node": "OpenAI Query Embeddings",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "OpenAI Query Embeddings": {
+            "main": [
+                [
+                    {
+                        "node": "Search in Qdrant",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Search in Qdrant": {
+            "main": [
+                [
+                    {
+                        "node": "Process Results",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Process Results": {
+            "main": [
+                [
+                    {
+                        "node": "Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": false,
+    "settings": {},
+    "versionId": "1"
+}

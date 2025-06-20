@@ -1,0 +1,104 @@
+version: "3.8"
+
+services:
+  # Backend Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://recruitment_user:recruitment_pass@postgres:5432/recruitment_db
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your_jwt_secret_key
+      - GOOGLE_CREDENTIALS_PATH=/app/credentials/google-credentials.json
+    volumes:
+      - ./backend:/app
+      - ./credentials:/app/credentials
+      - face_data:/app/face_recognition_data
+      - exam_videos:/app/exam_videos
+    depends_on:
+      - postgres
+      - qdrant
+      - redis
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_WS_URL=ws://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+  # n8n Service
+  n8n:
+    image: n8nio/n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_DATABASE_TYPE=postgresdb
+      - N8N_DATABASE_POSTGRESDB_HOST=postgres
+      - N8N_DATABASE_POSTGRESDB_DATABASE=recruitment_db
+      - N8N_DATABASE_POSTGRESDB_USER=recruitment_user
+      - N8N_DATABASE_POSTGRESDB_PASSWORD=recruitment_pass
+      - N8N_ENCRYPTION_KEY=your_encryption_key
+      - N8N_API_URL=http://localhost:3000
+      - N8N_WEBHOOK_URL=http://localhost:5678/webhook
+      - N8N_NOTIFICATION_EMAIL=admin@example.com
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      - postgres
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:13
+    environment:
+      - POSTGRES_DB=recruitment_db
+      - POSTGRES_USER=recruitment_user
+      - POSTGRES_PASSWORD=recruitment_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  # Redis Cache
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  redis_data:
+  n8n_data:
+  face_data:
+  exam_videos:

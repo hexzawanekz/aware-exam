@@ -1,0 +1,272 @@
+{
+    "name": "Dynamic AI Exam Workflow",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "generate-exam-v2",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "webhook-trigger",
+            "name": "Webhook Trigger",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                240,
+                300
+            ],
+            "webhookId": "generate-exam-v2"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://host.docker.internal:8000/api/v1/admin/exam-templates/save-draft",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "raw",
+                "body": "{\n  \"name\": \"AI Exam - {{ $json.programming_language }} ({{ $json.level }})\",\n  \"description\": \"AI-generated exam for {{ $json.programming_language }} at {{ $json.level }} level\",\n  \"programming_language\": \"{{ $json.programming_language }}\",\n  \"duration_minutes\": {{ $json.duration_minutes }},\n  \"position_id\": {{ $json.position }},\n  \"metadata\": {\n    \"config\": {\n      \"company_id\": {{ $json.company }},\n      \"department_id\": {{ $json.department }},\n      \"position_id\": {{ $json.position }},\n      \"programming_language\": \"{{ $json.programming_language }}\",\n      \"difficulty_level\": \"{{ $json.level }}\",\n      \"multiple_choice_count\": {{ $json.multiple_choice_count }},\n      \"coding_question_count\": {{ $json.coding_question_count }},\n      \"duration_minutes\": {{ $json.duration_minutes }}\n    }\n  }\n}",
+                "options": {}
+            },
+            "id": "save-draft",
+            "name": "Save Draft Exam",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                460,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=AIzaSyCf_LcAwCSeSV7qYYATtHY-0MF8fVGr4xw",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "raw",
+                "body": "{\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"Create {{ $node['Webhook Trigger'].json.multiple_choice_count }} multiple choice questions and {{ $node['Webhook Trigger'].json.coding_question_count }} coding questions for {{ $node['Webhook Trigger'].json.programming_language }} at {{ $node['Webhook Trigger'].json.level }} level.\\n\\nIMPORTANT: You MUST include this exam_id in your response: {{ $node['Save Draft Exam'].json.id }}\\n\\nRespond with ONLY valid JSON in this exact format:\\n{\\n  \\\"exam_id\\\": {{ $node['Save Draft Exam'].json.id }},\\n  \\\"questions\\\": [\\n    {\\n      \\\"type\\\": \\\"multiple_choice\\\",\\n      \\\"question\\\": \\\"What is a variable in {{ $node['Webhook Trigger'].json.programming_language }}?\\\",\\n      \\\"options\\\": [\\\"A storage location\\\", \\\"A function\\\", \\\"A loop\\\", \\\"A condition\\\"],\\n      \\\"correct_answer\\\": \\\"A storage location\\\"\\n    },\\n    {\\n      \\\"type\\\": \\\"coding\\\",\\n      \\\"question\\\": \\\"Write a function that adds two numbers in {{ $node['Webhook Trigger'].json.programming_language }}\\\",\\n      \\\"expected_output\\\": \\\"function add(a, b) { return a + b; }\\\"\\n    }\\n  ]\\n}\\n\\nGenerate exactly {{ $node['Webhook Trigger'].json.multiple_choice_count }} multiple choice and {{ $node['Webhook Trigger'].json.coding_question_count }} coding questions for {{ $node['Webhook Trigger'].json.level }} difficulty level.\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.8,\n    \"maxOutputTokens\": 3000\n  }\n}",
+                "options": {}
+            },
+            "id": "google-ai-request",
+            "name": "Google AI Request",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                680,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Extract the AI-generated response and prepare for database update\nconst webhookData = $node['Webhook Trigger'].json;\nconst draftData = $node['Save Draft Exam'].json;\nconst googleResponse = $node['Google AI Request'].json;\n\n// Extract the AI-generated text\nconst aiText = googleResponse.candidates[0].content.parts[0].text;\n\n// Parse the AI response to extract JSON\nlet aiQuestions;\ntry {\n  // Remove markdown code blocks if present\n  const cleanText = aiText.replace(/```json\\n?|```\\n?/g, '').trim();\n  aiQuestions = JSON.parse(cleanText);\n} catch (error) {\n  // Fallback if parsing fails\n  aiQuestions = {\n    exam_id: draftData.id,\n    questions: [{\n      type: \"multiple_choice\",\n      question: \"What is a variable in \" + webhookData.programming_language + \"?\",\n      options: [\"A storage location\", \"A function\", \"A loop\", \"A condition\"],\n      correct_answer: \"A storage location\"\n    }],\n    error: \"Failed to parse AI response: \" + error.message,\n    raw_ai_response: aiText\n  };\n}\n\n// Ensure exam_id is included\nif (!aiQuestions.exam_id) {\n  aiQuestions.exam_id = draftData.id;\n}\n\n// Prepare the update payload\nconst updatePayload = {\n  exam_id: draftData.id,\n  questions: aiQuestions.questions || [],\n  metadata: {\n    ai_generation: {\n      model: googleResponse.modelVersion || \"gemini-1.5-flash\",\n      tokens_used: googleResponse.usageMetadata?.totalTokenCount || 0,\n      response_id: googleResponse.responseId || \"unknown\",\n      generation_time: new Date().toISOString(),\n      raw_response: aiText\n    },\n    status: \"completed\"\n  }\n};\n\nreturn [{\n  json: updatePayload\n}];"
+            },
+            "id": "process-ai-response",
+            "name": "Process AI Response",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                900,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "PUT",
+                "url": "=http://host.docker.internal:8000/api/v1/admin/exam-templates/{{ $json.exam_id }}/update-with-questions",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "json",
+                "body": {
+                    "exam_id": "={{ $json.exam_id }}",
+                    "questions": "={{ $json.questions }}",
+                    "metadata": "={{ $json.metadata }}"
+                },
+                "options": {}
+            },
+            "id": "update-exam",
+            "name": "Update Exam with Questions",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                1120,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n  \"success\": true,\n  \"message\": \"AI exam generated successfully with dynamic workflow\",\n  \"exam_id\": {{ $node['Save Draft Exam'].json.id }},\n  \"questions_generated\": {{ $node['Process AI Response'].json.questions.length }},\n  \"ai_metadata\": {\n    \"model\": \"{{ $node['Process AI Response'].json.metadata.ai_generation.model }}\",\n    \"tokens_used\": {{ $node['Process AI Response'].json.metadata.ai_generation.tokens_used }},\n    \"generation_time\": \"{{ $node['Process AI Response'].json.metadata.ai_generation.generation_time }}\"\n  },\n  \"exam_details\": {\n    \"programming_language\": \"{{ $node['Webhook Trigger'].json.programming_language }}\",\n    \"difficulty_level\": \"{{ $node['Webhook Trigger'].json.level }}\",\n    \"duration_minutes\": {{ $node['Webhook Trigger'].json.duration_minutes }},\n    \"multiple_choice_count\": {{ $node['Webhook Trigger'].json.multiple_choice_count }},\n    \"coding_question_count\": {{ $node['Webhook Trigger'].json.coding_question_count }}\n  },\n  \"workflow_version\": \"v3-dynamic\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+                "options": {}
+            },
+            "id": "send-response",
+            "name": "Send Response",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                1340,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "{\n  \"success\": false,\n  \"error\": \"Failed to save draft exam\",\n  \"message\": \"Could not create initial exam record\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+                "options": {}
+            },
+            "id": "error-draft",
+            "name": "Error - Draft Failed",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                460,
+                480
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "{\n  \"success\": false,\n  \"error\": \"Google AI request failed\",\n  \"message\": \"Could not generate questions using AI\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+                "options": {}
+            },
+            "id": "error-ai",
+            "name": "Error - AI Failed",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                680,
+                480
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "{\n  \"success\": false,\n  \"error\": \"Failed to update exam with questions\",\n  \"message\": \"Questions generated but database update failed\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+                "options": {}
+            },
+            "id": "error-update",
+            "name": "Error - Update Failed",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                1120,
+                480
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Save Draft Exam",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Save Draft Exam": {
+            "main": [
+                [
+                    {
+                        "node": "Google AI Request",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ],
+            "error": [
+                [
+                    {
+                        "node": "Error - Draft Failed",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Google AI Request": {
+            "main": [
+                [
+                    {
+                        "node": "Process AI Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ],
+            "error": [
+                [
+                    {
+                        "node": "Error - AI Failed",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Process AI Response": {
+            "main": [
+                [
+                    {
+                        "node": "Update Exam with Questions",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Update Exam with Questions": {
+            "main": [
+                [
+                    {
+                        "node": "Send Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ],
+            "error": [
+                [
+                    {
+                        "node": "Error - Update Failed",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {},
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "staticData": null,
+    "tags": [],
+    "triggerCount": 0,
+    "updatedAt": "2025-06-16T00:40:00.000Z",
+    "versionId": "dynamic-v1"
+}

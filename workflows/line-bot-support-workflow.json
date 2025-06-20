@@ -1,0 +1,608 @@
+{
+    "name": "LINE Bot Support Workflow",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "line-webhook",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "webhook-line",
+            "name": "LINE Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                240,
+                300
+            ],
+            "notes": "Receives LINE Bot webhook events"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": true,
+                        "leftValue": "",
+                        "typeValidation": "strict"
+                    },
+                    "conditions": [
+                        {
+                            "id": "condition1",
+                            "leftValue": "={{ $json.events[0].type }}",
+                            "rightValue": "message",
+                            "operator": {
+                                "type": "string",
+                                "operation": "equals"
+                            }
+                        },
+                        {
+                            "id": "condition2",
+                            "leftValue": "={{ $json.events[0].message.text }}",
+                            "rightValue": "@support",
+                            "operator": {
+                                "type": "string",
+                                "operation": "contains"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                }
+            },
+            "id": "filter-mentions",
+            "name": "Filter Support Mentions",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                460,
+                300
+            ],
+            "notes": "Only process messages that mention @support"
+        },
+        {
+            "parameters": {
+                "jsCode": "// Extract customer data and message details\nconst event = $input.first().json.events[0];\nconst userId = event.source.userId;\nconst messageText = event.message.text;\nconst messageId = event.message.id;\nconst timestamp = new Date(event.timestamp).toISOString();\n\n// Check if message has image\nconst hasImage = event.message.type === 'image';\nconst imageId = hasImage ? event.message.id : null;\n\n// Extract issue details using simple text processing\nconst issueData = {\n  userId: userId,\n  messageId: messageId,\n  originalText: messageText,\n  timestamp: timestamp,\n  hasImage: hasImage,\n  imageId: imageId,\n  urgency: messageText.toLowerCase().includes('urgent') ? 'high' : 'normal',\n  category: extractCategory(messageText)\n};\n\nfunction extractCategory(text) {\n  const lowerText = text.toLowerCase();\n  if (lowerText.includes('bug') || lowerText.includes('error')) return 'bug';\n  if (lowerText.includes('feature') || lowerText.includes('request')) return 'feature';\n  if (lowerText.includes('login') || lowerText.includes('password')) return 'account';\n  return 'general';\n}\n\nreturn issueData;"
+            },
+            "id": "extract-data",
+            "name": "Extract Customer Data",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                680,
+                200
+            ],
+            "notes": "Extract and categorize customer issue data"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "boolean": [
+                        {
+                            "id": "hasImage",
+                            "value1": "={{ $json.hasImage }}",
+                            "value2": true
+                        }
+                    ]
+                }
+            },
+            "id": "check-image",
+            "name": "Has Image?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                900,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "url": "https://api-data.line.me/v2/bot/message/{{ $json.imageId }}/content",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "httpHeaderAuth": "lineBot",
+                "requestMethod": "GET",
+                "responseFormat": "file"
+            },
+            "id": "get-image",
+            "name": "Get LINE Image",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                1120,
+                100
+            ],
+            "notes": "Download image from LINE if present"
+        },
+        {
+            "parameters": {
+                "model": "text-embedding-3-small",
+                "input": "Customer Issue: {{ $('Extract Customer Data').item.json.originalText }} Category: {{ $('Extract Customer Data').item.json.category }} Urgency: {{ $('Extract Customer Data').item.json.urgency }}"
+            },
+            "id": "create-embedding",
+            "name": "Create Text Embedding",
+            "type": "n8n-nodes-base.openAi",
+            "typeVersion": 1,
+            "position": [
+                1120,
+                300
+            ],
+            "notes": "Create vector embedding for similarity search"
+        },
+        {
+            "parameters": {
+                "url": "http://qdrant:6333/collections/agent_memory/points",
+                "requestMethod": "PUT",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyContentType": "json",
+                "jsonBody": "{\n  \"points\": [\n    {\n      \"id\": \"{{ $('Extract Customer Data').item.json.messageId }}\",\n      \"vector\": {{ $json.data[0].embedding }},\n      \"payload\": {\n        \"userId\": \"{{ $('Extract Customer Data').item.json.userId }}\",\n        \"originalText\": \"{{ $('Extract Customer Data').item.json.originalText }}\",\n        \"category\": \"{{ $('Extract Customer Data').item.json.category }}\",\n        \"urgency\": \"{{ $('Extract Customer Data').item.json.urgency }}\",\n        \"timestamp\": \"{{ $('Extract Customer Data').item.json.timestamp }}\",\n        \"hasImage\": {{ $('Extract Customer Data').item.json.hasImage }},\n        \"type\": \"customer_issue\"\n      }\n    }\n  ]\n}"
+            },
+            "id": "store-qdrant",
+            "name": "Store in Qdrant",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                1340,
+                300
+            ],
+            "notes": "Store issue data in vector database"
+        },
+        {
+            "parameters": {
+                "url": "http://qdrant:6333/collections/agent_memory/points/search",
+                "requestMethod": "POST",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyContentType": "json",
+                "jsonBody": "{\n  \"vector\": {{ $('Create Text Embedding').item.json.data[0].embedding }},\n  \"limit\": 3,\n  \"with_payload\": true,\n  \"filter\": {\n    \"must\": [\n      {\n        \"key\": \"type\",\n        \"match\": {\n          \"value\": \"customer_issue\"\n        }\n      }\n    ]\n  }\n}"
+            },
+            "id": "search-similar",
+            "name": "Search Similar Issues",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                1560,
+                300
+            ],
+            "notes": "Find similar past issues for context"
+        },
+        {
+            "parameters": {
+                "model": "gemini-1.5-pro",
+                "prompt": "You are a technical support specialist. Analyze this customer issue and create a proper technical issue description.\n\nCustomer Message: {{ $('Extract Customer Data').item.json.originalText }}\nCategory: {{ $('Extract Customer Data').item.json.category }}\nUrgency: {{ $('Extract Customer Data').item.json.urgency }}\n\nSimilar Past Issues:\n{% for item in $('Search Similar Issues').item.json.result %}\n- {{ item.payload.originalText }} (Score: {{ item.score }})\n{% endfor %}\n\nPlease provide:\n1. A clear technical summary\n2. Recommended priority level (Low/Normal/High/Urgent)\n3. Suggested assignee type (frontend/backend/devops/qa)\n4. Initial troubleshooting steps\n5. Estimated resolution time\n\nRespond in JSON format:\n{\n  \"summary\": \"Clear technical description\",\n  \"priority\": \"Normal\",\n  \"assignee_type\": \"backend\",\n  \"steps\": [\"Step 1\", \"Step 2\"],\n  \"estimated_hours\": 4,\n  \"tags\": [\"bug\", \"api\"]\n}",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth"
+            },
+            "id": "gemini-analysis",
+            "name": "Gemini AI Analysis",
+            "type": "n8n-nodes-base.googleAi",
+            "typeVersion": 1,
+            "position": [
+                1780,
+                300
+            ],
+            "notes": "AI analyzes issue and suggests action"
+        },
+        {
+            "parameters": {
+                "jsCode": "// Parse Gemini response and prepare Redmine issue data\nconst geminiResponse = JSON.parse($input.first().json.text);\nconst customerData = $('Extract Customer Data').item.json;\nconst hasImage = $('Extract Customer Data').item.json.hasImage;\n\n// Map assignee type to actual developer\nconst assigneeMap = {\n  'frontend': 'john.doe',\n  'backend': 'jane.smith', \n  'devops': 'mike.wilson',\n  'qa': 'sarah.jones'\n};\n\nconst assignee = assigneeMap[geminiResponse.assignee_type] || 'john.doe';\n\n// Prepare Redmine issue payload\nconst redmineIssue = {\n  issue: {\n    project_id: 1, // Replace with your project ID\n    subject: `[LINE Support] ${geminiResponse.summary}`,\n    description: `**Customer Issue:**\\n${customerData.originalText}\\n\\n**AI Analysis:**\\n${geminiResponse.summary}\\n\\n**Recommended Steps:**\\n${geminiResponse.steps.map((step, i) => `${i+1}. ${step}`).join('\\n')}\\n\\n**Customer ID:** ${customerData.userId}\\n**Timestamp:** ${customerData.timestamp}\\n**Category:** ${customerData.category}`,\n    priority_id: getPriorityId(geminiResponse.priority),\n    assigned_to_id: getAssigneeId(assignee),\n    estimated_hours: geminiResponse.estimated_hours,\n    custom_fields: [\n      {\n        id: 1, // Custom field for LINE User ID\n        value: customerData.userId\n      },\n      {\n        id: 2, // Custom field for urgency\n        value: customerData.urgency\n      }\n    ]\n  }\n};\n\nfunction getPriorityId(priority) {\n  const priorityMap = {\n    'Low': 1,\n    'Normal': 2, \n    'High': 3,\n    'Urgent': 4\n  };\n  return priorityMap[priority] || 2;\n}\n\nfunction getAssigneeId(username) {\n  const userMap = {\n    'john.doe': 1,\n    'jane.smith': 2,\n    'mike.wilson': 3,\n    'sarah.jones': 4\n  };\n  return userMap[username] || 1;\n}\n\nreturn {\n  redminePayload: redmineIssue,\n  assigneeName: assignee,\n  priority: geminiResponse.priority,\n  summary: geminiResponse.summary,\n  hasImage: hasImage\n};"
+            },
+            "id": "prepare-redmine",
+            "name": "Prepare Redmine Issue",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2000,
+                300
+            ],
+            "notes": "Prepare data for Redmine API"
+        },
+        {
+            "parameters": {
+                "url": "https://your-redmine.company.com/issues.json",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpBasicAuth",
+                "httpBasicAuth": "redmineApi",
+                "requestMethod": "POST",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "X-Redmine-API-Key",
+                            "value": "={{$credentials.redmineApi.apiKey}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyContentType": "json",
+                "jsonBody": "={{ JSON.stringify($json.redminePayload) }}"
+            },
+            "id": "create-redmine-issue",
+            "name": "Create Redmine Issue",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                2220,
+                300
+            ],
+            "notes": "Create issue in Redmine via API"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "boolean": [
+                        {
+                            "id": "hasImage",
+                            "value1": "={{ $('Prepare Redmine Issue').item.json.hasImage }}",
+                            "value2": true
+                        }
+                    ]
+                }
+            },
+            "id": "check-image-upload",
+            "name": "Upload Image?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                2440,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "url": "https://your-redmine.company.com/uploads.json",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpBasicAuth",
+                "httpBasicAuth": "redmineApi",
+                "requestMethod": "POST",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/octet-stream"
+                        },
+                        {
+                            "name": "X-Redmine-API-Key",
+                            "value": "={{$credentials.redmineApi.apiKey}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyContentType": "binaryData",
+                "bodyBinaryPropertyName": "data"
+            },
+            "id": "upload-image-redmine",
+            "name": "Upload Image to Redmine",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                2660,
+                100
+            ],
+            "notes": "Upload image attachment to Redmine"
+        },
+        {
+            "parameters": {
+                "url": "https://your-redmine.company.com/issues/{{ $('Create Redmine Issue').item.json.issue.id }}.json",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpBasicAuth",
+                "httpBasicAuth": "redmineApi",
+                "requestMethod": "PUT",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "X-Redmine-API-Key",
+                            "value": "={{$credentials.redmineApi.apiKey}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyContentType": "json",
+                "jsonBody": "{\n  \"issue\": {\n    \"uploads\": [\n      {\n        \"token\": \"{{ $json.upload.token }}\",\n        \"filename\": \"customer_image.jpg\",\n        \"description\": \"Image from customer\"\n      }\n    ]\n  }\n}"
+            },
+            "id": "attach-image",
+            "name": "Attach Image to Issue",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                2880,
+                100
+            ],
+            "notes": "Attach uploaded image to the issue"
+        },
+        {
+            "parameters": {
+                "jsCode": "// Prepare Teams message\nconst issueData = $('Create Redmine Issue').item.json.issue;\nconst redmineData = $('Prepare Redmine Issue').item.json;\nconst customerData = $('Extract Customer Data').item.json;\n\n// Create rich Teams message card\nconst teamsMessage = {\n  \"@type\": \"MessageCard\",\n  \"@context\": \"https://schema.org/extensions\",\n  \"summary\": `New support issue assigned: ${redmineData.summary}`,\n  \"themeColor\": getPriorityColor(redmineData.priority),\n  \"sections\": [\n    {\n      \"activityTitle\": \"🎫 New Support Issue Assigned\",\n      \"activitySubtitle\": `Priority: ${redmineData.priority}`,\n      \"facts\": [\n        {\n          \"name\": \"Issue ID:\",\n          \"value\": `#${issueData.id}`\n        },\n        {\n          \"name\": \"Customer:\",\n          \"value\": customerData.userId\n        },\n        {\n          \"name\": \"Category:\",\n          \"value\": customerData.category\n        },\n        {\n          \"name\": \"Priority:\",\n          \"value\": redmineData.priority\n        },\n        {\n          \"name\": \"Assigned to:\", \n          \"value\": redmineData.assigneeName\n        }\n      ],\n      \"text\": `**Original Message:**\\n${customerData.originalText}\\n\\n**AI Summary:**\\n${redmineData.summary}`\n    }\n  ],\n  \"potentialAction\": [\n    {\n      \"@type\": \"OpenUri\",\n      \"name\": \"View in Redmine\",\n      \"targets\": [\n        {\n          \"os\": \"default\",\n          \"uri\": `https://your-redmine.company.com/issues/${issueData.id}`\n        }\n      ]\n    },\n    {\n      \"@type\": \"OpenUri\", \n      \"name\": \"Reply to Customer\",\n      \"targets\": [\n        {\n          \"os\": \"default\",\n          \"uri\": `https://manager.line.biz/account/@your-bot/talk/${customerData.userId}`\n        }\n      ]\n    }\n  ]\n};\n\nfunction getPriorityColor(priority) {\n  const colorMap = {\n    'Low': '28a745',\n    'Normal': '007bff', \n    'High': 'ffc107',\n    'Urgent': 'dc3545'\n  };\n  return colorMap[priority] || '007bff';\n}\n\nreturn {\n  teamsPayload: teamsMessage,\n  assigneeName: redmineData.assigneeName\n};"
+            },
+            "id": "prepare-teams-message",
+            "name": "Prepare Teams Message",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2660,
+                300
+            ],
+            "notes": "Prepare rich message card for Teams"
+        },
+        {
+            "parameters": {
+                "url": "https://outlook.office.com/webhook/YOUR-TEAMS-WEBHOOK-URL",
+                "requestMethod": "POST",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyContentType": "json",
+                "jsonBody": "={{ JSON.stringify($json.teamsPayload) }}"
+            },
+            "id": "send-teams-notification",
+            "name": "Send Teams Notification",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                2880,
+                300
+            ],
+            "notes": "Send notification to developer via Teams"
+        },
+        {
+            "parameters": {
+                "url": "https://api.line.me/v2/bot/message/reply",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "httpHeaderAuth": "lineBot",
+                "requestMethod": "POST",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyContentType": "json",
+                "jsonBody": "{\n  \"replyToken\": \"{{ $('LINE Webhook').item.json.events[0].replyToken }}\",\n  \"messages\": [\n    {\n      \"type\": \"text\",\n      \"text\": \"🎫 ขอบคุณที่แจ้งปัญหา! เราได้สร้างตั๋วแล้ว\\n\\n📋 Ticket ID: #{{ $('Create Redmine Issue').item.json.issue.id }}\\n⏰ คาดว่าจะแก้ไขภายใน {{ $('Prepare Redmine Issue').item.json.estimatedHours || 4 }} ชั่วโมง\\n\\n👨‍💻 ทีมงานจะติดต่อกลับในเร็วๆ นี้\"\n    }\n  ]\n}"
+            },
+            "id": "reply-customer",
+            "name": "Reply to Customer",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                3100,
+                300
+            ],
+            "notes": "Send confirmation reply to customer"
+        },
+        {
+            "parameters": {
+                "respondWith": "text",
+                "responseBody": "OK"
+            },
+            "id": "respond-ok",
+            "name": "Respond OK",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                3320,
+                300
+            ],
+            "notes": "Send OK response to LINE webhook"
+        }
+    ],
+    "connections": {
+        "LINE Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Filter Support Mentions",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Filter Support Mentions": {
+            "main": [
+                [
+                    {
+                        "node": "Extract Customer Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extract Customer Data": {
+            "main": [
+                [
+                    {
+                        "node": "Has Image?",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Create Text Embedding",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Has Image?": {
+            "main": [
+                [
+                    {
+                        "node": "Get LINE Image",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Create Text Embedding": {
+            "main": [
+                [
+                    {
+                        "node": "Store in Qdrant",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Store in Qdrant": {
+            "main": [
+                [
+                    {
+                        "node": "Search Similar Issues",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Search Similar Issues": {
+            "main": [
+                [
+                    {
+                        "node": "Gemini AI Analysis",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Gemini AI Analysis": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Redmine Issue",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Redmine Issue": {
+            "main": [
+                [
+                    {
+                        "node": "Create Redmine Issue",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Upload Image?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Create Redmine Issue": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Teams Message",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Upload Image?": {
+            "main": [
+                [
+                    {
+                        "node": "Upload Image to Redmine",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Upload Image to Redmine": {
+            "main": [
+                [
+                    {
+                        "node": "Attach Image to Issue",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Teams Message": {
+            "main": [
+                [
+                    {
+                        "node": "Send Teams Notification",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Send Teams Notification": {
+            "main": [
+                [
+                    {
+                        "node": "Reply to Customer",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Reply to Customer": {
+            "main": [
+                [
+                    {
+                        "node": "Respond OK",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": false,
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "versionId": "1"
+}

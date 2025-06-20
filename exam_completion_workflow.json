@@ -1,0 +1,270 @@
+{
+    "name": "Exam Completion & Evaluation Workflow",
+    "active": true,
+    "nodes": [
+        {
+            "parameters": {
+                "path": "exam-complete",
+                "options": {
+                    "responseMode": "lastNode"
+                }
+            },
+            "name": "Exam Completion Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                250,
+                300
+            ],
+            "id": "webhook-exam-complete"
+        },
+        {
+            "parameters": {
+                "functionCode": "// Validate input data\nconst sessionId = $input.item.json.session_id;\nif (!sessionId) {\n  throw new Error('Missing session_id parameter');\n}\n\nreturn {\n  json: {\n    session_id: sessionId,\n    event_type: $input.item.json.event_type || 'exam_completed',\n    timestamp: new Date().toISOString()\n  }\n};"
+            },
+            "name": "Validate Input",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                450,
+                300
+            ],
+            "id": "validate-input"
+        },
+        {
+            "parameters": {
+                "url": "=http://host.docker.internal:8000/api/v1/exam/sessions/{{ $json.session_id }}/details",
+                "authentication": "none",
+                "requestMethod": "GET",
+                "options": {
+                    "response": {
+                        "response": {
+                            "fullResponse": true
+                        }
+                    }
+                }
+            },
+            "name": "Get Exam Session",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                650,
+                300
+            ],
+            "id": "get-exam-session"
+        },
+        {
+            "parameters": {
+                "functionCode": "// Auto-score the exam based on answers and correct answers\nconst examData = $input.item.json;\nconst questions = examData.randomized_questions || [];\nconst answers = examData.answers || {};\n\nlet totalScore = 0;\nlet maxScore = 0;\nconst gradingDetails = [];\n\n// Process each question\nquestions.forEach((question, index) => {\n  const questionId = question.id || index;\n  const userAnswer = answers[questionId];\n  \n  if (question.type === 'multiple_choice') {\n    maxScore += question.score || 10;\n    \n    if (userAnswer && userAnswer === question.correct_answer) {\n      totalScore += question.score || 10;\n      gradingDetails.push({\n        question_id: questionId,\n        type: 'multiple_choice',\n        correct: true,\n        score: question.score || 10,\n        max_score: question.score || 10\n      });\n    } else {\n      gradingDetails.push({\n        question_id: questionId,\n        type: 'multiple_choice',\n        correct: false,\n        score: 0,\n        max_score: question.score || 10,\n        correct_answer: question.correct_answer,\n        user_answer: userAnswer\n      });\n    }\n  } else if (question.type === 'code' || question.type === 'coding') {\n    maxScore += question.score || 20;\n    \n    // Simple code evaluation - check if answer exists and has some content\n    let codeScore = 0;\n    if (userAnswer && typeof userAnswer === 'string' && userAnswer.trim().length > 10) {\n      // Basic scoring: give partial credit for attempt\n      if (userAnswer.length > 50) {\n        codeScore = Math.round((question.score || 20) * 0.7); // 70% for substantial attempt\n      } else {\n        codeScore = Math.round((question.score || 20) * 0.3); // 30% for basic attempt\n      }\n    }\n    \n    totalScore += codeScore;\n    gradingDetails.push({\n      question_id: questionId,\n      type: 'code',\n      score: codeScore,\n      max_score: question.score || 20,\n      user_answer: userAnswer,\n      expected_answer: question.expected_output\n    });\n  }\n});\n\nconst finalScore = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;\n\nreturn {\n  json: {\n    session_id: examData.session_id,\n    candidate_id: examData.candidate_id,\n    total_score: totalScore,\n    max_score: maxScore,\n    percentage_score: finalScore,\n    grading_details: gradingDetails,\n    questions_count: questions.length,\n    timestamp: new Date().toISOString()\n  }\n};"
+            },
+            "name": "Auto Score Exam",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                850,
+                300
+            ],
+            "id": "auto-score-exam"
+        },
+        {
+            "parameters": {
+                "url": "=http://host.docker.internal:8000/api/v1/exam/sessions/{{ $json.session_id }}/proctoring-logs",
+                "authentication": "none",
+                "requestMethod": "GET",
+                "options": {
+                    "response": {
+                        "response": {
+                            "fullResponse": true
+                        }
+                    }
+                }
+            },
+            "name": "Get Proctoring Data",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1050,
+                300
+            ],
+            "id": "get-proctoring-data"
+        },
+        {
+            "parameters": {
+                "functionCode": "// Analyze proctoring events and calculate cheating probability\nconst examData = $input.item.json;\nconst proctoringLogs = examData.proctoring_logs || [];\n\n// Define event weights for cheating probability\nconst eventWeights = {\n  'face_lost': 0.3,\n  'multiple_faces': 0.8,\n  'phone_detected': 0.9,\n  'tab_switch': 0.7,\n  'fullscreen_exit': 0.6,\n  'suspicious_movement': 0.4,\n  'poor_lighting': 0.2\n};\n\nlet cheatingScore = 0;\nlet totalEvents = 0;\nconst suspiciousEvents = [];\n\n// Process each proctoring event\nproctoringLogs.forEach(log => {\n  const eventType = log.event_type;\n  const confidence = log.confidence || 0.7;\n  const weight = eventWeights[eventType] || 0.3;\n  \n  totalEvents++;\n  const eventScore = weight * confidence;\n  cheatingScore += eventScore;\n  \n  if (eventScore > 0.5) {\n    suspiciousEvents.push({\n      timestamp: log.timestamp,\n      event_type: eventType,\n      confidence: confidence,\n      severity: eventScore > 0.7 ? 'high' : eventScore > 0.4 ? 'medium' : 'low',\n      description: getEventDescription(eventType),\n      duration: log.event_metadata?.duration || '1 วินาที'\n    });\n  }\n});\n\n// Normalize cheating probability (0-100%)\nconst cheatingProbability = Math.min(100, Math.round(cheatingScore * 25));\n\n// Determine AI confidence based on data quality\nlet aiConfidence = 85; // Base confidence\nif (totalEvents > 10) aiConfidence += 10;\nif (proctoringLogs.length > 5) aiConfidence += 5;\naiConfidence = Math.min(95, aiConfidence);\n\n// Determine pass/fail status\nconst passingScore = 60;\nconst examPassed = examData.percentage_score >= passingScore && cheatingProbability < 50;\n\nfunction getEventDescription(eventType) {\n  const descriptions = {\n    'face_lost': 'ไม่พบใบหน้าในกรอบ',\n    'multiple_faces': 'พบใบหน้ามากกว่า 1 คน',\n    'phone_detected': 'พบวัตถุคล้ายมือถือ',\n    'tab_switch': 'เปลี่ยนแท็บเบราว์เซอร์',\n    'fullscreen_exit': 'ออกจากโหมดเต็มจอ',\n    'suspicious_movement': 'ความเคลื่อนไหวน่าสงสัย',\n    'poor_lighting': 'แสงไม่เพียงพอ'\n  };\n  return descriptions[eventType] || 'กิจกรรมน่าสงสัย';\n}\n\nreturn {\n  json: {\n    session_id: examData.session_id,\n    candidate_id: examData.candidate_id,\n    exam_score: examData.percentage_score,\n    cheating_percentage: cheatingProbability,\n    ai_confidence: aiConfidence,\n    status: examPassed ? 'passed' : 'failed',\n    total_events: totalEvents,\n    suspicious_events: suspiciousEvents,\n    analysis_metadata: {\n      total_proctoring_events: proctoringLogs.length,\n      high_risk_events: suspiciousEvents.filter(e => e.severity === 'high').length,\n      passing_threshold: passingScore,\n      cheating_threshold: 50,\n      analysis_timestamp: new Date().toISOString()\n    }\n  }\n};"
+            },
+            "name": "Analyze Proctoring",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1250,
+                300
+            ],
+            "id": "analyze-proctoring"
+        },
+        {
+            "parameters": {
+                "url": "=http://host.docker.internal:8000/api/v1/exam/sessions/{{ $json.session_id }}/update-results",
+                "authentication": "none",\n        "requestMethod": "POST",
+                "body": "={{ {\n  score: $json.exam_score,\n  status: $json.status,\n  cheating_probability: $json.cheating_percentage,\n  ai_confidence: $json.ai_confidence,\n  suspicious_events: $json.suspicious_events,\n  analysis_metadata: $json.analysis_metadata\n} }}",
+                "options": {
+                    "bodyContentType": "json",
+                    "response": {
+                        "response": {
+                            "fullResponse": true
+                        }
+                    }
+                }
+            },
+            "name": "Update Exam Results",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1450,
+                300
+            ],
+            "id": "update-exam-results"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "boolean": [
+                        {
+                            "value1": "={{ $json.cheating_percentage }}",
+                            "operation": "largerEqual",
+                            "value2": 70
+                        }
+                    ]
+                }
+            },
+            "name": "High Risk Alert?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                1650,
+                200
+            ],
+            "id": "high-risk-check"
+        },
+        {
+            "parameters": {
+                "functionCode": "// Generate comprehensive evaluation report\nconst data = $input.item.json;\n\nconst report = {\n  success: true,\n  message: 'Exam evaluation completed successfully',\n  session_id: data.session_id,\n  candidate_id: data.candidate_id,\n  results: {\n    score: data.exam_score,\n    status: data.status,\n    cheating_probability: data.cheating_percentage,\n    ai_confidence: data.ai_confidence,\n    risk_level: data.cheating_percentage >= 70 ? 'high' : data.cheating_percentage >= 30 ? 'medium' : 'low'\n  },\n  proctoring_summary: {\n    total_events: data.total_events,\n    suspicious_events_count: data.suspicious_events.length,\n    high_severity_events: data.suspicious_events.filter(e => e.severity === 'high').length\n  },\n  processing_metadata: {\n    workflow_version: 'exam_completion_v1',\n    processing_time: new Date().toISOString(),\n    components_processed: ['scoring', 'proctoring_analysis', 'risk_assessment']\n  }\n};\n\nreturn { json: report };"
+            },
+            "name": "Generate Final Report",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1850,
+                300
+            ],
+            "id": "generate-final-report"
+        }
+    ],
+    "connections": {
+        "Exam Completion Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Validate Input",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Validate Input": {
+            "main": [
+                [
+                    {
+                        "node": "Get Exam Session",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Exam Session": {
+            "main": [
+                [
+                    {
+                        "node": "Auto Score Exam",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Auto Score Exam": {
+            "main": [
+                [
+                    {
+                        "node": "Get Proctoring Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Proctoring Data": {
+            "main": [
+                [
+                    {
+                        "node": "Analyze Proctoring",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Analyze Proctoring": {
+            "main": [
+                [
+                    {
+                        "node": "Update Exam Results",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "High Risk Alert?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Update Exam Results": {
+            "main": [
+                [
+                    {
+                        "node": "Generate Final Report",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "High Risk Alert?": {
+            "main": [
+                [
+                    {
+                        "node": "Generate Final Report",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {},
+    "settings": {
+        "timezone": "Asia/Bangkok"
+    },
+    "staticData": null,
+    "tags": [
+        "exam",
+        "evaluation",
+        "proctoring"
+    ],
+    "triggerCount": 0,
+    "updatedAt": "2025-06-17T00:00:00.000Z",
+    "versionId": "1"
+}

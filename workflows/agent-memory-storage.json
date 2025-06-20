@@ -1,0 +1,114 @@
+{
+    "name": "Agent Memory Storage",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "store-memory",
+                "responseMode": "responseNode"
+            },
+            "id": "webhook-1",
+            "name": "Webhook - Store Memory",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                240,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "model": "text-embedding-ada-002",
+                "input": "={{ $json.content }}"
+            },
+            "id": "openai-1",
+            "name": "OpenAI Embeddings",
+            "type": "n8n-nodes-base.openAi",
+            "typeVersion": 1,
+            "position": [
+                460,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "http://qdrant:6333/collections/agent_memory/points",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "requestMethod": "PUT",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyContentType": "json",
+                "jsonBody": "{\n  \"points\": [\n    {\n      \"id\": \"{{ $('Webhook - Store Memory').item.json.id || new Date().getTime().toString() }}\",\n      \"vector\": {{ $json.data[0].embedding }},\n      \"payload\": {\n        \"content\": \"{{ $('Webhook - Store Memory').item.json.content }}\",\n        \"timestamp\": \"{{ new Date().toISOString() }}\",\n        \"type\": \"{{ $('Webhook - Store Memory').item.json.type || 'conversation' }}\",\n        \"user_id\": \"{{ $('Webhook - Store Memory').item.json.user_id || 'default' }}\",\n        \"session_id\": \"{{ $('Webhook - Store Memory').item.json.session_id || 'default' }}\"\n      }\n    }\n  ]\n}"
+            },
+            "id": "http-1",
+            "name": "Store in Qdrant",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                680,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "{\n  \"success\": true,\n  \"message\": \"Memory stored successfully\",\n  \"id\": \"{{ $('Store in Qdrant').item.json.result.operation_id }}\",\n  \"content\": \"{{ $('Webhook - Store Memory').item.json.content }}\"\n}"
+            },
+            "id": "respond-1",
+            "name": "Response",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                900,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook - Store Memory": {
+            "main": [
+                [
+                    {
+                        "node": "OpenAI Embeddings",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "OpenAI Embeddings": {
+            "main": [
+                [
+                    {
+                        "node": "Store in Qdrant",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Store in Qdrant": {
+            "main": [
+                [
+                    {
+                        "node": "Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": false,
+    "settings": {},
+    "versionId": "1"
+}

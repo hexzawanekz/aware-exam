@@ -1,0 +1,45 @@
+# Core FastAPI (Lite version for development)
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Database
+sqlalchemy==2.0.23
+alembic==1.13.0
+psycopg2-binary==2.9.7
+
+# Cache & Queue
+redis==5.0.1
+
+# Core utilities
+pydantic==2.5.0
+pydantic-settings==2.1.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+aiofiles==23.2.1
+
+# Basic image processing (faster install)
+opencv-python-headless==4.8.1.78
+numpy==1.24.3
+Pillow==10.1.0
+
+# Google APIs (ปรับปรุงแล้ว)
+google-api-python-client==2.110.0
+google-auth-httplib2==0.1.1
+google-auth-oauthlib==1.1.0
+
+# WebSocket
+websockets==12.0
+
+# Utils
+httpx==0.25.2
+requests==2.31.0
+python-dotenv==1.0.0
+email-validator==2.1.0
+
+# Development
+pytest==7.4.3
+pytest-asyncio==0.21.1
+
+# Note: Face recognition libraries removed for faster development builds
+# Add them back in production requirements.txt when needed 

@@ -1,0 +1,1921 @@
+{
+    "name": "Futuristic",
+    "nodes": [
+        {
+            "parameters": {
+                "content": "## Generate Video",
+                "height": 260,
+                "width": 860,
+                "color": 7
+            },
+            "type": "n8n-nodes-base.stickyNote",
+            "position": [
+                -600,
+                220
+            ],
+            "typeVersion": 1,
+            "id": "db19efb8-b883-4674-b4a7-21c7b6c13a91",
+            "name": "Sticky Note"
+        },
+        {
+            "parameters": {
+                "content": "## Generate Audio",
+                "height": 260,
+                "width": 860,
+                "color": 7
+            },
+            "type": "n8n-nodes-base.stickyNote",
+            "position": [
+                -600,
+                500
+            ],
+            "typeVersion": 1,
+            "id": "e5c75b22-9d27-4368-bf80-c2e8d689d3f8",
+            "name": "Sticky Note1"
+        },
+        {
+            "parameters": {},
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 3.1,
+            "position": [
+                -460,
+                820
+            ],
+            "id": "e5e47c46-cd22-41bd-8c52-faa82bf3f14f",
+            "name": "Merge"
+        },
+        {
+            "parameters": {
+                "content": "## Generate Image",
+                "height": 260,
+                "width": 860,
+                "color": 7
+            },
+            "type": "n8n-nodes-base.stickyNote",
+            "position": [
+                -600,
+                -60
+            ],
+            "typeVersion": 1,
+            "id": "6f086ffc-df51-48ca-9f79-4403a57b9c65",
+            "name": "Sticky Note2"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.creatomate.com/v1/renders",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization"
+                        },
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"template_id\": \"6f1ee225-c21c-406e-8d63-8d501ea2673a\",\n  \"modifications\": {\n    \"Audio-1.source\": \"{{ $json.data[4].audio.url }}\",\n    \"Video-1.source\": \"{{ $json.data[0].video.url }}\",\n    \"Video-2.source\": \"{{ $json.data[1].video.url }}\",\n    \"Video-3.source\": \"{{ $json.data[2].video.url }}\",\n    \"Video-4.source\": \"{{ $json.data[3].video.url }}\"\n  }\n}",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -460,
+                1020
+            ],
+            "id": "0bd5be5f-eef4-4560-852f-3cf27516eb8c",
+            "name": "Render Video",
+            "executeOnce": true
+        },
+        {
+            "parameters": {
+                "aggregate": "aggregateAllItemData",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.aggregate",
+            "typeVersion": 1,
+            "position": [
+                -20,
+                820
+            ],
+            "id": "dd78f880-bfa4-4638-adc9-b7d7ce8098a1",
+            "name": "Aggregate1"
+        },
+        {
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "f0c3d23d-8e28-42c4-9aff-1a4b7571bd73",
+                            "name": "url",
+                            "value": "={{ $json.url }}",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.4,
+            "position": [
+                -20,
+                1020
+            ],
+            "id": "48f8a5f7-39b7-4f25-8fb0-9fb6c929df10",
+            "name": "Set_url"
+        },
+        {
+            "parameters": {
+                "schemaType": "manual",
+                "inputSchema": "{\n\t\"type\": \"object\",\n\t\"properties\": {\n\t\t\"title\": {\n\t\t\t\"type\": \"string\"\n\t\t},\n\t\t\"description\": {\n\t\t\t\"type\": \"string\"\n\t\t},\n        \"hashtags\": {\n            \"type\": \"string\"\n        }\n\t}\n}"
+            },
+            "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+            "typeVersion": 1.2,
+            "position": [
+                -960,
+                1260
+            ],
+            "id": "902c8aed-5a0e-47a3-ba20-cf97d148a1cd",
+            "name": "Structured Output Parser"
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "type": "@n8n/n8n-nodes-langchain.outputParserAutofixing",
+            "typeVersion": 1,
+            "position": [
+                -1280,
+                1260
+            ],
+            "id": "231acc71-f934-4401-9b11-80a7161e9b8a",
+            "name": "Auto-fixing Output Parser2"
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+            "typeVersion": 1,
+            "position": [
+                -1400,
+                1260
+            ],
+            "id": "b2410a9d-4c98-4455-a0d8-4d2f5248b2eb",
+            "name": "OpenRouter Chat Model3",
+            "credentials": {
+                "openRouterApi": {
+                    "id": "6olLtB2wzJeOhjDu",
+                    "name": "OpenRouter account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "amount": 45
+            },
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1.1,
+            "position": [
+                -240,
+                20
+            ],
+            "id": "5ff7328d-fe54-4736-a6c9-678ac0eca7db",
+            "name": "Wait_45s",
+            "webhookId": "9c33bc28-efda-485d-8f6a-3c53d470f28d"
+        },
+        {
+            "parameters": {
+                "amount": 3
+            },
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1.1,
+            "position": [
+                -240,
+                1020
+            ],
+            "id": "f6e67649-86f0-437c-a595-c51ec91fd620",
+            "name": "Wait_1m",
+            "webhookId": "3b681f73-210d-4f68-bd97-2aee7c3c1ef1"
+        },
+        {
+            "parameters": {
+                "mode": "combine",
+                "combineBy": "combineByPosition",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 3.1,
+            "position": [
+                -460,
+                1240
+            ],
+            "id": "f637cf06-0222-42bf-be60-ec79f5ab546b",
+            "name": "Merge1"
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "type": "@n8n/n8n-nodes-langchain.outputParserAutofixing",
+            "typeVersion": 1,
+            "position": [
+                -1280,
+                840
+            ],
+            "id": "8bba8579-a25f-45de-b605-104d213e2f0c",
+            "name": "Auto-fixing Output Parser1"
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+            "typeVersion": 1,
+            "position": [
+                -1400,
+                840
+            ],
+            "id": "14123086-9c01-457d-9d79-5371514d1e00",
+            "name": "OpenRouter Chat Model",
+            "credentials": {
+                "openRouterApi": {
+                    "id": "6olLtB2wzJeOhjDu",
+                    "name": "OpenRouter account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "fieldToSplitOut": "output",
+                "include": "allOtherFields",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.splitOut",
+            "typeVersion": 1,
+            "position": [
+                -1000,
+                660
+            ],
+            "id": "2b71a008-c805-4343-b9e2-d1837582ab0c",
+            "name": "Split Out"
+        },
+        {
+            "parameters": {
+                "jsonSchemaExample": "[\n  {\n    \"scene_number\": 1,\n    \"prompt\": \"full detailed prompt for scene 1\"\n  },\n  {\n    \"scene_number\": 2,\n    \"prompt\": \"full detailed prompt for scene 2\"\n  },\n  {\n    \"scene_number\": 3,\n    \"prompt\": \"full detailed prompt for scene 3\"\n  },\n  {\n    \"scene_number\": 4,\n    \"prompt\": \"full detailed prompt for scene 4\"\n  }\n]"
+            },
+            "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+            "typeVersion": 1.2,
+            "position": [
+                -960,
+                840
+            ],
+            "id": "77e709c9-1db3-41d3-b42d-e15ed26c6d14",
+            "name": "Structured Output Parser1"
+        },
+        {
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "4d409857-da25-4df2-8038-57f514a13039",
+                            "name": "scene_number",
+                            "value": "={{ $json.output.scene_number }}",
+                            "type": "number"
+                        },
+                        {
+                            "id": "4578edb7-5c9c-4aa2-856a-f0635699941d",
+                            "name": "image_prompt",
+                            "value": "={{ $json.output.prompt }}",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.4,
+            "position": [
+                -780,
+                660
+            ],
+            "id": "144e3e40-f1f3-4a83-a047-b4e73029fa57",
+            "name": "Edit Fields"
+        },
+        {
+            "parameters": {
+                "fieldToSplitOut": "output",
+                "include": "allOtherFields",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.splitOut",
+            "typeVersion": 1,
+            "position": [
+                -1000,
+                420
+            ],
+            "id": "6ef133b9-bd74-4170-8070-5b09609b8818",
+            "name": "Split Out1"
+        },
+        {
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "4d409857-da25-4df2-8038-57f514a13039",
+                            "name": "scene_number",
+                            "value": "={{ $json.output.scene_number }}",
+                            "type": "number"
+                        },
+                        {
+                            "id": "4578edb7-5c9c-4aa2-856a-f0635699941d",
+                            "name": "video_prompt",
+                            "value": "={{ $json.output.prompt }}",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.4,
+            "position": [
+                -780,
+                420
+            ],
+            "id": "eb3fb586-48a1-4235-b38f-51a5df5981d6",
+            "name": "Edit Fields1"
+        },
+        {
+            "parameters": {
+                "mode": "combine",
+                "combineBy": "combineByPosition",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 3.1,
+            "position": [
+                -780,
+                20
+            ],
+            "id": "1cc335e3-3f3f-44a6-b8ba-0f1aacca9cf0",
+            "name": "Merge2"
+        },
+        {
+            "parameters": {
+                "promptType": "define",
+                "text": "=Create image prompts by following this Prompt Pattern (Per Scene) and here are variables you need to fill in each prompt. No tree in each scene:\n{{ $json.text }}\n\nScene 1: Overall Scene Prompt (Master View)\nA 8k Panoramic view of a hyper-detailed, high-resolution overall view of a futuristic <city_type> realm built with <materials> set in a <terrain or setting>, featuring <architecture_style>, <elements> blend with the <environment> under <lighting>, with multi-layered transit system and expansive atmosphere. The city is surrounded by <supporting elements>, all positioned <above/around/within> a <Geological Formation> . Built by Top visionary architects and futuristic engineers. Inspired by <aesthetic_refs>. Hyper-realistic, ultra-detailed, volumetric lighting, 3D architectural style, awe-inspiring scale. **No tree in the scene”\n\nScene 2: Street-Level or Walkthrough Scene\n“A 8k walk way-level close-up showing <human_activity> in the {futuristic <city_type> realm built with <materials> set in a <terrain or setting>, featuring <architecture_style>, <elements> blend with the <environment> under <lighting>, dynamic and expansive atmosphere. The city is surrounded by <supporting elements>, all positioned <above/around/within> a <Geological Formation> . Built by Top visionary architects and futuristic engineers. Inspired by <aesthetic_refs>}. People move across floating platforms giving a sense of scale. <lighting> reflects off surfaces as <elements> hover in the distance. Lush design details and engineering marvels fill the frame. Low-angle close-up, Hyper-realistic, immersive, highly detailed.3D architectural style. **No tree in the scene”\n\nScene 3: Interior or Close-Up Architecture Scene\n“An ultra close-up 8k of an interior structure or balcony in the {futuristic <city_type> realm built with <materials> set in a <terrain or setting>, featuring <architecture_style>, <elements> blend with the <environment> under <lighting>, dynamic and expansive atmosphere. The city is surrounded by <supporting elements>, all positioned <above/around/within> a <Geological Formation> . Built by Top visionary architects and futuristic engineers. Inspired by <aesthetic_refs>} , showing <human_activity>, intricate <material_details> on architecture. The design showcases <materials>, with embedded lights and elegant textures. Views of the city in the background through open spaces. A blend of advanced technology and beautiful architecture. Zoomed interior.Hyper-realistic, 3D architectural style. **No tree in the scene”\n\nScene 4: Detail-Focused Scene (Structure/Tech/Design)\n“A 8k detailed focus on <Supporting elements> within the {futuristic <city_type> realm built with <materials> set in a <terrain or setting>, featuring <architecture_style>, <elements> blend with the <environment> under <lighting>, dynamic and expansive atmosphere. The city is surrounded by <supporting elements>, all positioned <above/around/within> a <Geological Formation> . Built by Top visionary architects and futuristic engineers. Inspired by <aesthetic_refs>}. Designed with <architecture_style>, featuring <materials> and embedded futuristic lighting. Vines, drones, or glowing patterns may accent the surface. A clean, high-resolution view highlighting the craft, realism, and elegance of the city's futuristic design. Cinematic tone, 3D architectural style. **No tree in the scene”",
+                "hasOutputParser": true
+            },
+            "type": "@n8n/n8n-nodes-langchain.chainLlm",
+            "typeVersion": 1.5,
+            "position": [
+                -1400,
+                660
+            ],
+            "id": "80791c17-1a8c-4067-aac8-5bba2a7e321d",
+            "name": "Image Prompt"
+        },
+        {
+            "parameters": {
+                "promptType": "define",
+                "text": "=Create video prompts by following this Prompt Pattern (Per Scene) and here are variables you need to fill in each prompt.\n{{ $json.text }}\n\n1. Scene 1: Master Aerial Flythrough (Establishing Shot)\n“A steady drone-style camera flight moving straight forward into a colossal futuristic city \n, featuring floating highways, flying cars, and glowing pathways. The camera glides smoothly between megastructures, revealing elegant sky bridges and vehicles soaring past. Misty clouds drift below as sunlight pierces through, casting soft shadows and golden highlights across the architectural surfaces. The scene blends epic scale with intricate detail. Lens flare, subtle camera shake, and atmospheric particles enhance realism. Cinematic 4K quality, slow and steady movement, majestic tone.”\n\n2. Scene 2: Street-Level Motion Walkthrough\n“A ground-level tracking shot through a bustling futuristic street high above the clouds, surrounded by white-and-gold skyscrapers and illuminated walkways. The camera moves forward steadily, weaving between crowds of people walking across floating platforms. Flying cars zip above, and reflections ripple across glossy floors. Trees sway gently on suspended gardens. Subtle lens blur, volumetric lighting, and real-time shadows create depth and immersion. Daylight with ambient glow. Shot in cinematic 4k, 24fps with soft motion blur.”\n\n3. Scene 3: Interior Balcony or Dome Room\n“A slow panning from left to right with a fly through drone view shot across a futuristic interior, with views of the sky city stretching far into the distance. The camera tilts gently, and rotates to follow light beams streaming through curved windows. Reflections play across polished surfaces, while soft, golden lighting adds warmth and elegance. Quiet atmosphere, with subtle ambient movement like flickering UI lights or floating data projections.Shot in cinematic 4k, 24fps with soft motion blur.”\n\n4. Scene 4: Detail Close-Up (Architectural or Tech Focus)\n“A hyper-close rotating shot of a futuristic architectural detail with flying vehicles and drones, such as a levitating bridge segment, golden dome, or embedded lighting structure. The camera slowly orbits the object, revealing textures like metallic patterns, moss-covered surfaces, or shimmering glass. Nanotech pulses through internal circuits, or soft lights travel across embedded lines. Mist curls at the edges, and depth of field shifts gently to draw attention to materials and lighting. Extremely high-resolution,4k , realistic textures, and elegant focus transitions.”\n",
+                "hasOutputParser": true
+            },
+            "type": "@n8n/n8n-nodes-langchain.chainLlm",
+            "typeVersion": 1.5,
+            "position": [
+                -1400,
+                420
+            ],
+            "id": "ed85ec27-158a-40d8-be08-2dbd9ba256b6",
+            "name": "Video Prompt"
+        },
+        {
+            "parameters": {
+                "url": "={{ $json.url }}",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -1780,
+                280
+            ],
+            "id": "66dca3a8-308f-447d-a876-fbb97a9b1fb0",
+            "name": "Download Video",
+            "retryOnFail": true
+        },
+        {
+            "parameters": {
+                "content": "## Upload to \"Youtube\", \"Tiktok\"",
+                "height": 1620,
+                "width": 420,
+                "color": 4
+            },
+            "type": "n8n-nodes-base.stickyNote",
+            "position": [
+                -1940,
+                -200
+            ],
+            "typeVersion": 1,
+            "id": "e60a45ff-fefd-40e4-bb58-e9eceb71247d",
+            "name": "Sticky Note5"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.upload-post.com/api/upload",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "multipart-form-data",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "title",
+                            "value": "={{ $json.title }} {{ $json.Description }} {{ $json.Hashtags }}"
+                        },
+                        {
+                            "name": "user",
+                            "value": "Krano"
+                        },
+                        {
+                            "name": "platform[]",
+                            "value": "tiktok"
+                        },
+                        {
+                            "parameterType": "formBinaryData",
+                            "name": "video",
+                            "inputDataFieldName": "data"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -1780,
+                800
+            ],
+            "id": "3fb4cef1-bd2a-4068-9e8c-d538aa183a2c",
+            "name": "Tiktok"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.upload-post.com/api/upload",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "multipart-form-data",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "title",
+                            "value": "={{ $json.title }} {{ $json.Description }} {{ $json.Hashtags }}"
+                        },
+                        {
+                            "name": "user",
+                            "value": "Krano"
+                        },
+                        {
+                            "name": "platform[]",
+                            "value": "instagram"
+                        },
+                        {
+                            "parameterType": "formBinaryData",
+                            "name": "video",
+                            "inputDataFieldName": "data"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -1780,
+                1000
+            ],
+            "id": "a1be0b29-1133-41fe-bb1a-0c877d3310b3",
+            "name": "Instagram"
+        },
+        {
+            "parameters": {},
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1.1,
+            "position": [
+                -1780,
+                460
+            ],
+            "id": "1769f2d2-2650-4bea-83d2-4fb158bc524a",
+            "name": "Wait1",
+            "webhookId": "abc7c35e-bc90-4869-b7c4-0d51b1d0af3c"
+        },
+        {
+            "parameters": {
+                "jsCode": "// --- DATA SETUP --- //\nconst cityType = [\n  \"white utopian architecture\",\n  \"a sprawling futuristic megacity\",\n  \"a high-altitude spaceport tower\",\n  \"a coastal outpost settlement\",\n  \"a deep-ocean research base\",\n  \"a desert oasis bio-dome\",\n  \"Arabian-futurist fusion\",\n  \"Sharp, aerodynamic skyscrapers\",\n  \"Floating City on the ocean Powered by solar tech\",\n  \"Martian Colony City\",\n  \"AI-Governed Smart City\",\n  \"Underwater glass domes tech city\",\n  \"Alien Hybrid City\",\n  \"Time-looped City\",\n  \"sculptural stylized neo-futuristic city\",\n  \"neo-futuristic urban utopia\"\n];\n\nconst terrainOrSetting = [\n  \"set in jagged crystalline cliffs\",\n  \"surrounded by stormy gas clouds\",\n  \"floating above a reflective alien sea\",\n  \"built into red Martian canyons\",\n  \"nestled on snowy arctic bluffs\",\n  \"situated in dense alien jungles\",\n  \"Arctic/Ice Wasteland\",\n  \"Desert Dunes\",\n  \"Volcanic Crater\",\n  \"Ethereal Cloud City\",\n  \"Ocean Surface / Archipelago\",\n  \"Hollowed Asteroid\",\n  \"High-Tech Ruins in Ancient Terrain\"\n];\n\nconst environment = [\n  \"swirling fog around base structures\",\n  \"Soft light\",\n  \"dusk\",\n  \"golden hour\",\n  \"post-rain\",\n  \"evening light\"\n];\n\nconst architectureStyle = [\n  \"sleek modern\",\n  \"high-tech\",\n  \"utopian elegance\",\n  \"cylindrical towers\",\n  \"suspended platforms\",\n  \"sky bridges\",\n  \"megastructures\",\n  \"Parametric Architecture\",\n  \"Metabolist Architecture\",\n  \"Techno-Organic Fusion\",\n  \"holographic form\",\n  \"Tensegrity Structures\",\n  \"Aetherpunk Design\",\n  \"Crystalline Gothic\",\n  \"Celestial Mandala Architecture\"\n];\n\nconst materials = [\n  \"white stone\",\n  \"glass\",\n  \"semi-transparent lattice shells\",\n  \"gold domes\",\n  \"vegetation\",\n  \"metallics\",\n  \"polished stone\",\n  \"glowing circuits\",\n  \"gold trims\",\n  \"smooth black concrete\",\n  \"Electrochromic Glass\",\n  \"Photoluminescent Concrete\",\n  \"Light-Reactive Alloys\",\n  \"Synthetic Quartz\"\n];\n\nconst lighting = [\n  \"golden-hour sunlight\",\n  \"ambient glow\",\n  \"neon reflection\",\n  \"High contrast\",\n  \"misty rays\",\n  \"misty daylight\"\n];\n\nconst elements = [\n  \"a high-tech monorail\",\n  \"smooth dome-shaped skyscrapers\",\n  \"spire-like translucent towers\",\n  \"modular hexagonal habitat pods\",\n  \"aerodynamic glass pyramids\",\n  \"stacked ring-shaped platforms\",\n  \"sky bridges\",\n  \"floating walkways\",\n  \"hover cars\",\n  \"drone swarms\",\n  \"airborne transit\",\n  \"domes\",\n  \"vertical towers\",\n  \"vines\",\n  \"Möbius loops\",\n  \"Klein bottles\",\n  \"impossible geometry\"\n];\n\nconst aestheticRefs = [\n  \"Blade Runner / Avatar / Dune / Cloud Atlas / Biopunk\",\n  \"Smooth aerodynamic shapes\",\n  \"Zaha Hadid-inspired\",\n  \"Inception\",\n  \"TRON: Legacy\",\n  \"Japanese Wabi-Sabi\",\n  \"Nordic Minimalism\",\n  \"Norman Foster\",\n  \"Santiago Calatrava\",\n  \"Antoni Gaudí\",\n  \"SANAA (Kazuyo Sejima + Ryue Nishizawa)\",\n  \"Kenzo Tange\"\n];\n\nconst humanActivity = [\n  \"people walking\",\n  \"people lounging on benches\",\n  \"people interacting with tech\",\n  \"observing from platform\"\n];\n\nconst supportingElements = [\n  \"high-tech yachts and floating landing pads\",\n  \"flying vehicles navigating layered traffic lanes\",\n  \"winding elevated highways\",\n  \"cargo drones and automated repair bots\",\n  \"long bridges suspended between cliffs\",\n  \"hyperloop cars\"\n];\n\nconst geologicalFormation = [\n  \"sky islands floating above clouds\",\n  \"shimmering desert glass plains\",\n  \"cratered volcanic lake with glowing lava veins\",\n  \"cliffside overlooking a turquoise alien bay\"\n];\n\n// --- UTILITY FUNCTION --- //\nfunction getRandomItem(list) {\n  return list[Math.floor(Math.random() * list.length)];\n}\n\n// --- OUTPUT FOR N8N --- //\nconst randomCityType = getRandomItem(cityType);\nconst randomTerrainOrSetting = getRandomItem(terrainOrSetting);\nconst randomEnvironment = getRandomItem(environment);\nconst randomArchitectureStyle = getRandomItem(architectureStyle);\nconst randomMaterials = getRandomItem(materials);\nconst randomLighting = getRandomItem(lighting);\nconst randomElements = getRandomItem(elements);\nconst randomAestheticRefs = getRandomItem(aestheticRefs);\nconst randomHumanActivity = getRandomItem(humanActivity);\nconst randomSupportingElements = getRandomItem(supportingElements);\nconst randomGeologicalFormation = getRandomItem(geologicalFormation);\n\n// ✅ FINAL RETURN FOR N8N (เหมือนรถหรูเป๊ะ)\nreturn [\n  {\n    json: {\n      randomCityType,\n      randomTerrainOrSetting,\n      randomEnvironment,\n      randomArchitectureStyle,\n      randomMaterials,\n      randomLighting,\n      randomElements,\n      randomAestheticRefs,\n      randomHumanActivity,\n      randomSupportingElements,\n      randomGeologicalFormation\n    }\n  }\n];\n"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                -1200,
+                180
+            ],
+            "id": "29b4bfee-678a-413f-9fa7-80bd0a73fbc4",
+            "name": "Random Theme"
+        },
+        {
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "de3ac9f3-7ded-4aa2-b069-f7333c89b3d1",
+                            "name": "<city_type>",
+                            "value": "={{ $json.randomCityType }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "0eca0cc3-7b31-4571-8ac8-7a96d6f7b2e5",
+                            "name": "<Terrain or Setting>",
+                            "value": "={{ $json.randomTerrainOrSetting }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "cb736845-af07-4c77-961e-71ff84894b9f",
+                            "name": "<environment>",
+                            "value": "={{ $json.randomEnvironment }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "8e139c98-53d9-440f-97c7-5848ef1711cc",
+                            "name": "<architecture_style>",
+                            "value": "={{ $json.randomArchitectureStyle }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "1f7a1c4f-7b48-4897-8bae-dcb409f08dff",
+                            "name": "<materials>",
+                            "value": "={{ $json.randomMaterials }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "453d0e7b-af86-45e5-afb3-0053632f5a53",
+                            "name": "<lighting>",
+                            "value": "={{ $json.randomLighting }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "7778133c-4f41-4120-ae6b-cfd55dfae12f",
+                            "name": "<elements>",
+                            "value": "={{ $json.randomElements }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "59078cd8-9152-4875-af35-eed4bc3d4c78",
+                            "name": "<aesthetic_refs>",
+                            "value": "={{ $json.randomAestheticRefs }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "d0ec9255-9bf8-4223-9290-dcd59f8789f1",
+                            "name": "<human_activity>",
+                            "value": "={{ $json.randomHumanActivity }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "8c408b7a-4c1a-4f48-8bb9-a81eb8601638",
+                            "name": "<Supporting elements>",
+                            "value": "={{ $json.randomSupportingElements }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "2366d3d8-f335-4363-9d32-f5ab7c3916eb",
+                            "name": "<Geological Formation>",
+                            "value": "={{ $json.randomGeologicalFormation }}",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.4,
+            "position": [
+                -1000,
+                180
+            ],
+            "id": "e5fa24ce-51d1-473b-8d75-dabbb6e7bbaf",
+            "name": "Edit Fields3"
+        },
+        {
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "546157e3-7d19-4010-817c-7faae306353c",
+                            "name": "text",
+                            "value": "={{ JSON.stringify($json).replace(/[{}\"]/g, '').replace(/,/g, '\\n') }}\n",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.4,
+            "position": [
+                -780,
+                180
+            ],
+            "id": "0e5c285a-1848-47f9-b1f5-89f184254f0e",
+            "name": "Edit Fields4"
+        },
+        {
+            "parameters": {
+                "content": "## Render",
+                "height": 400,
+                "width": 860
+            },
+            "type": "n8n-nodes-base.stickyNote",
+            "position": [
+                -600,
+                780
+            ],
+            "typeVersion": 1,
+            "id": "e6d25793-776e-4a29-9456-61be2af518b6",
+            "name": "Sticky Note3"
+        },
+        {
+            "parameters": {
+                "content": "## Image & Video Prompts",
+                "height": 640,
+                "width": 880,
+                "color": 6
+            },
+            "type": "n8n-nodes-base.stickyNote",
+            "position": [
+                -1500,
+                360
+            ],
+            "typeVersion": 1,
+            "id": "cc051c84-879b-4952-a45b-6ae5179c273a",
+            "name": "Sticky Note4"
+        },
+        {
+            "parameters": {
+                "content": "## Title & Description",
+                "height": 400,
+                "width": 880,
+                "color": 5
+            },
+            "type": "n8n-nodes-base.stickyNote",
+            "position": [
+                -1500,
+                1020
+            ],
+            "typeVersion": 1,
+            "id": "fae48376-0c59-43b8-b2b0-75d95329c8af",
+            "name": "Sticky Note6"
+        },
+        {
+            "parameters": {
+                "content": "## Save",
+                "height": 220,
+                "width": 860,
+                "color": 4
+            },
+            "type": "n8n-nodes-base.stickyNote",
+            "position": [
+                -600,
+                1200
+            ],
+            "typeVersion": 1,
+            "id": "9cbcad86-78c2-4fbe-a38e-b5b2b7acdda7",
+            "name": "Sticky Note7"
+        },
+        {
+            "parameters": {},
+            "type": "n8n-nodes-base.manualTrigger",
+            "typeVersion": 1,
+            "position": [
+                -1460,
+                40
+            ],
+            "id": "219c7664-ee33-4bac-92e1-9e381e365ec3",
+            "name": "When clicking ‘Test workflow’"
+        },
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "cronExpression",
+                            "expression": "30 14 * * *"
+                        },
+                        {
+                            "field": "cronExpression",
+                            "expression": "30 18 * * *"
+                        }
+                    ]
+                }
+            },
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1.2,
+            "position": [
+                -1460,
+                180
+            ],
+            "id": "d6056eaf-c780-4cb8-ae5a-c7b1d12287b7",
+            "name": "Schedule Trigger"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.upload-post.com/api/upload",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "multipart-form-data",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "title",
+                            "value": "={{ $json.title }}"
+                        },
+                        {
+                            "name": "user",
+                            "value": "Krano"
+                        },
+                        {
+                            "name": "platform[]",
+                            "value": "youtube"
+                        },
+                        {
+                            "parameterType": "formBinaryData",
+                            "name": "video",
+                            "inputDataFieldName": "data"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -1780,
+                640
+            ],
+            "id": "c8d614bf-9bbf-4f7e-ae1d-a61e8debd5dc",
+            "name": "Youtube"
+        },
+        {
+            "parameters": {
+                "pollTimes": {
+                    "item": [
+                        {
+                            "mode": "everyMinute"
+                        }
+                    ]
+                },
+                "documentId": {
+                    "__rl": true,
+                    "value": "1hcTGWy7_FgLkJ5LK3i0gz01BEeDw7S6RIdb8tiX6ZUU",
+                    "mode": "list",
+                    "cachedResultName": "Video Prod",
+                    "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hcTGWy7_FgLkJ5LK3i0gz01BEeDw7S6RIdb8tiX6ZUU/edit?usp=drivesdk"
+                },
+                "sheetName": {
+                    "__rl": true,
+                    "value": "gid=0",
+                    "mode": "list",
+                    "cachedResultName": "Sheet1",
+                    "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hcTGWy7_FgLkJ5LK3i0gz01BEeDw7S6RIdb8tiX6ZUU/edit#gid=0"
+                },
+                "event": "rowUpdate",
+                "options": {
+                    "columnsToWatch": [
+                        "Upload"
+                    ]
+                }
+            },
+            "type": "n8n-nodes-base.googleSheetsTrigger",
+            "typeVersion": 1,
+            "position": [
+                -1780,
+                -80
+            ],
+            "id": "3b78ee41-93f1-471c-ac62-5aa7075a1169",
+            "name": "Get List",
+            "credentials": {
+                "googleSheetsTriggerOAuth2Api": {
+                    "id": "NNo2WejS2ytnVAgC",
+                    "name": "Google Sheets Trigger account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "documentId": {
+                    "__rl": true,
+                    "value": "1hcTGWy7_FgLkJ5LK3i0gz01BEeDw7S6RIdb8tiX6ZUU",
+                    "mode": "list",
+                    "cachedResultName": "Video Prod",
+                    "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hcTGWy7_FgLkJ5LK3i0gz01BEeDw7S6RIdb8tiX6ZUU/edit?usp=drivesdk"
+                },
+                "sheetName": {
+                    "__rl": true,
+                    "value": "gid=0",
+                    "mode": "list",
+                    "cachedResultName": "Sheet1",
+                    "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hcTGWy7_FgLkJ5LK3i0gz01BEeDw7S6RIdb8tiX6ZUU/edit#gid=0"
+                },
+                "filtersUI": {
+                    "values": [
+                        {
+                            "lookupColumn": "status",
+                            "lookupValue": "PRODUCTION"
+                        },
+                        {
+                            "lookupColumn": "Upload",
+                            "lookupValue": "UPLOAD"
+                        },
+                        {
+                            "lookupColumn": "Channel Type",
+                            "lookupValue": "Tower"
+                        },
+                        {
+                            "lookupColumn": "Posted"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.googleSheets",
+            "typeVersion": 4.5,
+            "position": [
+                -1780,
+                100
+            ],
+            "id": "7a188b8d-6d74-45c7-895c-8cbeea202329",
+            "name": "Select once",
+            "executeOnce": true,
+            "credentials": {
+                "googleSheetsOAuth2Api": {
+                    "id": "rl2byzadHtzbSBF3",
+                    "name": "twutc.88"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "operation": "update",
+                "documentId": {
+                    "__rl": true,
+                    "value": "1hcTGWy7_FgLkJ5LK3i0gz01BEeDw7S6RIdb8tiX6ZUU",
+                    "mode": "list",
+                    "cachedResultName": "Video Prod",
+                    "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hcTGWy7_FgLkJ5LK3i0gz01BEeDw7S6RIdb8tiX6ZUU/edit?usp=drivesdk"
+                },
+                "sheetName": {
+                    "__rl": true,
+                    "value": "gid=0",
+                    "mode": "list",
+                    "cachedResultName": "Sheet1",
+                    "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hcTGWy7_FgLkJ5LK3i0gz01BEeDw7S6RIdb8tiX6ZUU/edit#gid=0"
+                },
+                "columns": {
+                    "mappingMode": "defineBelow",
+                    "value": {
+                        "Posted": "Posted",
+                        "row_number": "={{ $('Wait1').item.json.row_number }}"
+                    },
+                    "matchingColumns": [
+                        "row_number"
+                    ],
+                    "schema": [
+                        {
+                            "id": "title",
+                            "displayName": "title",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "Description",
+                            "displayName": "Description",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "Hashtags",
+                            "displayName": "Hashtags",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true,
+                            "removed": false
+                        },
+                        {
+                            "id": "Channel Type",
+                            "displayName": "Channel Type",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "url",
+                            "displayName": "url",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "update",
+                            "displayName": "update",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "status",
+                            "displayName": "status",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "Upload",
+                            "displayName": "Upload",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "Posted",
+                            "displayName": "Posted",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "row_number",
+                            "displayName": "row_number",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true,
+                            "readOnly": true,
+                            "removed": false
+                        }
+                    ],
+                    "attemptToConvertTypes": false,
+                    "convertFieldsToString": false
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.googleSheets",
+            "typeVersion": 4.5,
+            "position": [
+                -1780,
+                1200
+            ],
+            "id": "17038c35-5cd4-4ea4-a0a7-b0196b15a4de",
+            "name": "Update Row",
+            "credentials": {
+                "googleSheetsOAuth2Api": {
+                    "id": "rl2byzadHtzbSBF3",
+                    "name": "twutc.88"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "promptType": "define",
+                "text": "=Generate a Youtube Short & TikTok \n\n- title\n- short description (max 30 words) \n- 5 hastags for very high-engagement. ** format (\"#A, #B, #C\") **\n\nbased on 4 scenes in the story:\nScene 1 - {{ $json.output[0].prompt }}\nScene 2 - {{ $json.output[1].prompt }}\nScene 3 - {{ $json.output[2].prompt }}\nScene 4 - {{ $json.output[3].prompt }}",
+                "hasOutputParser": true
+            },
+            "type": "@n8n/n8n-nodes-langchain.chainLlm",
+            "typeVersion": 1.5,
+            "position": [
+                -1400,
+                1100
+            ],
+            "id": "fc12e47b-8987-4ea7-8af2-e5dd777e90bf",
+            "name": "title & description"
+        },
+        {
+            "parameters": {
+                "operation": "append",
+                "documentId": {
+                    "__rl": true,
+                    "value": "1hcTGWy7_FgLkJ5LK3i0gz01BEeDw7S6RIdb8tiX6ZUU",
+                    "mode": "list",
+                    "cachedResultName": "Video Prod",
+                    "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hcTGWy7_FgLkJ5LK3i0gz01BEeDw7S6RIdb8tiX6ZUU/edit?usp=drivesdk"
+                },
+                "sheetName": {
+                    "__rl": true,
+                    "value": "gid=0",
+                    "mode": "list",
+                    "cachedResultName": "Sheet1",
+                    "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hcTGWy7_FgLkJ5LK3i0gz01BEeDw7S6RIdb8tiX6ZUU/edit#gid=0"
+                },
+                "columns": {
+                    "mappingMode": "defineBelow",
+                    "value": {
+                        "title": "={{ $json.output.title }}",
+                        "Description": "={{ $json.output.description }}",
+                        "url": "={{ $json.url }}",
+                        "update": "={{ $now.format('yyyy-MM-dd') }}",
+                        "status": "READY",
+                        "Channel Type": "Tower",
+                        "Hashtags": "=#Futuristic, #aiDesign, #Architecture, #aiart, #city"
+                    },
+                    "matchingColumns": [],
+                    "schema": [
+                        {
+                            "id": "title",
+                            "displayName": "title",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "Description",
+                            "displayName": "Description",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "Hashtags",
+                            "displayName": "Hashtags",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true,
+                            "removed": false
+                        },
+                        {
+                            "id": "Channel Type",
+                            "displayName": "Channel Type",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true,
+                            "removed": false
+                        },
+                        {
+                            "id": "url",
+                            "displayName": "url",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "update",
+                            "displayName": "update",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "status",
+                            "displayName": "status",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true
+                        },
+                        {
+                            "id": "Upload",
+                            "displayName": "Upload",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true,
+                            "removed": false
+                        },
+                        {
+                            "id": "Posted",
+                            "displayName": "Posted",
+                            "required": false,
+                            "defaultMatch": false,
+                            "display": true,
+                            "type": "string",
+                            "canBeUsedToMatch": true,
+                            "removed": false
+                        }
+                    ],
+                    "attemptToConvertTypes": false,
+                    "convertFieldsToString": false
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.googleSheets",
+            "typeVersion": 4.5,
+            "position": [
+                -20,
+                1240
+            ],
+            "id": "9ba904e1-793c-4cb7-8ec2-dc70ddf43f9b",
+            "name": "Update Sheet",
+            "credentials": {
+                "googleSheetsOAuth2Api": {
+                    "id": "rl2byzadHtzbSBF3",
+                    "name": "twutc.88"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://queue.fal.run/fal-ai/flux-pro/v1.1-ultra",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "prompt",
+                            "value": "={{ $json.image_prompt }}"
+                        },
+                        {
+                            "name": "aspect_ratio",
+                            "value": "9:16"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -460,
+                20
+            ],
+            "id": "e18acae2-e90c-47c8-802b-ac997a214234",
+            "name": "Gen Image"
+        },
+        {
+            "parameters": {
+                "url": "=https://queue.fal.run/fal-ai/flux-pro/requests/{{ $json.request_id }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "Key 1f6438e6-0fd9-4008-95d3-47a93f7448a7:65bb39d37ccdd5a4ee995d34d6c9c698"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -20,
+                20
+            ],
+            "id": "6cba2dfc-b5c1-48a8-9d12-e67a0bd6625f",
+            "name": "Get Image URL"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "=https://queue.fal.run/fal-ai/kling-video/v1.6/pro/image-to-video",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "prompt",
+                            "value": "={{ $('Merge2').item.json.video_prompt }}"
+                        },
+                        {
+                            "name": "image_url",
+                            "value": "={{ $json.images[0].url }}"
+                        },
+                        {
+                            "name": "duration",
+                            "value": "={{ 5 }}"
+                        },
+                        {
+                            "name": "aspect_ratio",
+                            "value": "9:16"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -460,
+                300
+            ],
+            "id": "95b35e17-722b-42f0-abae-ebf43684f4ed",
+            "name": "Gen Video"
+        },
+        {
+            "parameters": {
+                "url": "=https://queue.fal.run/fal-ai/kling-video/requests/{{ $json.request_id }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "Key 1f6438e6-0fd9-4008-95d3-47a93f7448a7:65bb39d37ccdd5a4ee995d34d6c9c698"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -20,
+                300
+            ],
+            "id": "619fdc19-5a82-4580-be1e-a33857f3138e",
+            "name": "Get Video URL"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://queue.fal.run/fal-ai/elevenlabs/sound-effects",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "text",
+                            "value": "=An intense 128 BPM sci-fi soundtrack blending industrial pulses, glitchy textures, arpeggiated synths, and ambient echoes. Evokes a futuristic mega-city’s heartbeat with mechanical hisses, digital rhythms, and cinematic swells—no voice, purely atmospheric and immersive."
+                        },
+                        {
+                            "name": "duration_seconds",
+                            "value": "={{ 20 }}"
+                        },
+                        {
+                            "name": "prompt_influence",
+                            "value": "={{ 0.8 }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -460,
+                580
+            ],
+            "id": "65eb3902-ac25-409e-bcdf-8e8560fee65a",
+            "name": "Gen Music"
+        },
+        {
+            "parameters": {
+                "url": "=https://queue.fal.run/fal-ai/elevenlabs/requests/{{ $json.request_id }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "Key 1f6438e6-0fd9-4008-95d3-47a93f7448a7:65bb39d37ccdd5a4ee995d34d6c9c698"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -20,
+                580
+            ],
+            "id": "ed8fa667-4839-4b7c-904d-25e93cb8dfee",
+            "name": "Get Music URL"
+        },
+        {
+            "parameters": {
+                "amount": 8,
+                "unit": "minutes"
+            },
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1.1,
+            "position": [
+                -240,
+                300
+            ],
+            "id": "10f888d9-e5ff-48e2-ab87-d9deab929103",
+            "name": "Wait_8m",
+            "webhookId": "e37974fd-cda7-4056-812c-0cf155a3f1bd"
+        },
+        {
+            "parameters": {
+                "amount": 45
+            },
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1.1,
+            "position": [
+                -240,
+                580
+            ],
+            "id": "4e8d70c0-42c0-47c9-8c1a-97f02b4e511c",
+            "name": "Wait_45s 2",
+            "webhookId": "9c33bc28-efda-485d-8f6a-3c53d470f28d"
+        },
+        {
+            "parameters": {
+                "content": "## Random Theme",
+                "height": 380,
+                "width": 880,
+                "color": 3
+            },
+            "type": "n8n-nodes-base.stickyNote",
+            "position": [
+                -1500,
+                -40
+            ],
+            "typeVersion": 1,
+            "id": "69691da1-503a-45ef-a8bc-ab580ca42c74",
+            "name": "Sticky Note8"
+        }
+    ],
+    "pinData": {},
+    "connections": {
+        "Merge": {
+            "main": [
+                [
+                    {
+                        "node": "Aggregate1",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Aggregate1": {
+            "main": [
+                [
+                    {
+                        "node": "Render Video",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Render Video": {
+            "main": [
+                [
+                    {
+                        "node": "Wait_1m",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Structured Output Parser": {
+            "ai_outputParser": [
+                [
+                    {
+                        "node": "Auto-fixing Output Parser2",
+                        "type": "ai_outputParser",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Auto-fixing Output Parser2": {
+            "ai_outputParser": [
+                [
+                    {
+                        "node": "title & description",
+                        "type": "ai_outputParser",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Set_url": {
+            "main": [
+                [
+                    {
+                        "node": "Merge1",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "OpenRouter Chat Model3": {
+            "ai_languageModel": [
+                [
+                    {
+                        "node": "title & description",
+                        "type": "ai_languageModel",
+                        "index": 0
+                    },
+                    {
+                        "node": "Auto-fixing Output Parser2",
+                        "type": "ai_languageModel",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait_45s": {
+            "main": [
+                [
+                    {
+                        "node": "Get Image URL",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait_1m": {
+            "main": [
+                [
+                    {
+                        "node": "Set_url",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Merge1": {
+            "main": [
+                [
+                    {
+                        "node": "Update Sheet",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Auto-fixing Output Parser1": {
+            "ai_outputParser": [
+                [
+                    {
+                        "node": "Image Prompt",
+                        "type": "ai_outputParser",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "OpenRouter Chat Model": {
+            "ai_languageModel": [
+                [
+                    {
+                        "node": "Auto-fixing Output Parser1",
+                        "type": "ai_languageModel",
+                        "index": 0
+                    },
+                    {
+                        "node": "Image Prompt",
+                        "type": "ai_languageModel",
+                        "index": 0
+                    },
+                    {
+                        "node": "Video Prompt",
+                        "type": "ai_languageModel",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Structured Output Parser1": {
+            "ai_outputParser": [
+                [
+                    {
+                        "node": "Auto-fixing Output Parser1",
+                        "type": "ai_outputParser",
+                        "index": 0
+                    },
+                    {
+                        "node": "Video Prompt",
+                        "type": "ai_outputParser",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Split Out": {
+            "main": [
+                [
+                    {
+                        "node": "Edit Fields",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Split Out1": {
+            "main": [
+                [
+                    {
+                        "node": "Edit Fields1",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Edit Fields": {
+            "main": [
+                [
+                    {
+                        "node": "Merge2",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Edit Fields1": {
+            "main": [
+                [
+                    {
+                        "node": "Merge2",
+                        "type": "main",
+                        "index": 1
+                    }
+                ]
+            ]
+        },
+        "Image Prompt": {
+            "main": [
+                [
+                    {
+                        "node": "Split Out",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "title & description",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Video Prompt": {
+            "main": [
+                [
+                    {
+                        "node": "Split Out1",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Merge2": {
+            "main": [
+                [
+                    {
+                        "node": "Gen Image",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Download Video": {
+            "main": [
+                [
+                    {
+                        "node": "Wait1",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Instagram": {
+            "main": [
+                [
+                    {
+                        "node": "Update Row",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait1": {
+            "main": [
+                [
+                    {
+                        "node": "Tiktok",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Instagram",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Youtube",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Random Theme": {
+            "main": [
+                [
+                    {
+                        "node": "Edit Fields3",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Edit Fields3": {
+            "main": [
+                [
+                    {
+                        "node": "Edit Fields4",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Edit Fields4": {
+            "main": [
+                [
+                    {
+                        "node": "Image Prompt",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Video Prompt",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "When clicking ‘Test workflow’": {
+            "main": [
+                [
+                    {
+                        "node": "Random Theme",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Schedule Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Random Theme",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get List": {
+            "main": [
+                [
+                    {
+                        "node": "Select once",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Select once": {
+            "main": [
+                [
+                    {
+                        "node": "Download Video",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "title & description": {
+            "main": [
+                [
+                    {
+                        "node": "Merge1",
+                        "type": "main",
+                        "index": 1
+                    }
+                ]
+            ]
+        },
+        "Update Sheet": {
+            "main": [
+                []
+            ]
+        },
+        "Gen Image": {
+            "main": [
+                [
+                    {
+                        "node": "Wait_45s",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Image URL": {
+            "main": [
+                [
+                    {
+                        "node": "Gen Video",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Gen Video": {
+            "main": [
+                [
+                    {
+                        "node": "Wait_8m",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Video URL": {
+            "main": [
+                [
+                    {
+                        "node": "Merge",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Gen Music",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Gen Music": {
+            "main": [
+                [
+                    {
+                        "node": "Wait_45s 2",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Music URL": {
+            "main": [
+                [
+                    {
+                        "node": "Merge",
+                        "type": "main",
+                        "index": 1
+                    }
+                ]
+            ]
+        },
+        "Wait_8m": {
+            "main": [
+                [
+                    {
+                        "node": "Get Video URL",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait_45s 2": {
+            "main": [
+                [
+                    {
+                        "node": "Get Music URL",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": false,
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "versionId": "559b45bc-da24-43d2-9d12-5dc7b829a08c",
+    "meta": {
+        "templateCredsSetupCompleted": true,
+        "instanceId": "72b9042dabcef92ad4ab6bd2229d7c71758787da163de13e487514b58fa005c0"
+    },
+    "id": "aTbjftZjcpdZoQVk",
+    "tags": [
+        {
+            "createdAt": "2025-03-24T13:00:05.204Z",
+            "updatedAt": "2025-03-24T13:00:05.204Z",
+            "id": "d3WhJdTlkQnTVSKk",
+            "name": "tiktok"
+        }
+    ]
+}

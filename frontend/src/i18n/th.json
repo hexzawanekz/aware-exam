@@ -1,0 +1,105 @@
+{
+    "app": {
+        "title": "ระบบสอบเข้าเพื่อสมัครงาน",
+        "subtitle": "ระบบสอบออนไลน์ที่ปลอดภัยและแม่นยำ"
+    },
+    "login": {
+        "title": "เข้าสู่ระบบ",
+        "email": "อีเมล",
+        "password": "รหัสผ่าน",
+        "login_button": "เข้าสู่ระบบ",
+        "register_link": "ลงทะเบียนใหม่",
+        "forgot_password": "ลืมรหัสผ่าน?",
+        "invalid_credentials": "อีเมลหรือรหัสผ่านไม่ถูกต้อง"
+    },
+    "exam": {
+        "title": "การสอบ",
+        "start_exam": "เริ่มการสอบ",
+        "submit_exam": "ส่งข้อสอบ",
+        "time_remaining": "เวลาที่เหลือ",
+        "question": "ข้อที่",
+        "of": "จาก",
+        "next": "ถัดไป",
+        "previous": "ก่อนหน้า",
+        "minutes": "นาที",
+        "seconds": "วินาที",
+        "exam_completed": "ข้อสอบเสร็จสิ้น",
+        "thank_you": "ขอบคุณสำหรับการสอบ",
+        "results_will_be_sent": "ผลการสอบจะถูกส่งทางอีเมล"
+    },
+    "proctoring": {
+        "title": "การควบคุมการสอบ",
+        "camera_access": "การเข้าถึงกล้อง",
+        "camera_required": "จำเป็นต้องเปิดกล้องสำหรับการสอบ",
+        "allow_camera": "อนุญาตการใช้กล้อง",
+        "face_detection": "ตรวจจับใบหน้า",
+        "face_detected": "ตรวจพบใบหน้า",
+        "face_not_detected": "ไม่พบใบหน้า",
+        "identity_verified": "ยืนยันตัวตนแล้ว",
+        "identity_not_verified": "ไม่สามารถยืนยันตัวตนได้",
+        "multiple_faces": "พบใบหน้าหลายคน",
+        "looking_away": "กำลังมองออกไป",
+        "head_down": "ก้มหน้า",
+        "talking_detected": "ตรวจพบการพูด",
+        "mouth_movement": "การเคลื่อนไหวของปาก",
+        "digital_device": "อุปกรณ์ดิจิทัล",
+        "suspicious_activity": "กิจกรรมน่าสงสัย"
+    },
+    "fullscreen": {
+        "title": "โหมดเต็มจอ",
+        "required": "จำเป็นต้องใช้โหมดเต็มจอสำหรับการสอบ",
+        "enable": "เปิดโหมดเต็มจอ",
+        "warning": "คำเตือน",
+        "exit_warning": "หากคุณออกจากโหมดเต็มจอ การสอบจะสิ้นสุดทันที",
+        "continue": "ดำเนินการต่อ",
+        "end_exam": "จบการสอบ"
+    },
+    "security": {
+        "title": "ความปลอดภัย",
+        "copy_paste_disabled": "ปิดการใช้งาน Copy/Paste",
+        "right_click_disabled": "ปิดการคลิกขวา",
+        "developer_tools_disabled": "ปิดการใช้งาน Developer Tools",
+        "tab_switch_detected": "ตรวจพบการเปลี่ยนแท็บ",
+        "window_focus_lost": "หน้าต่างสูญเสียโฟกัส",
+        "violation_count": "จำนวนการละเมิด"
+    },
+    "admin": {
+        "title": "ระบบผู้ดูแล",
+        "dashboard": "แดชบอร์ด",
+        "companies": "บริษัท",
+        "departments": "แผนก",
+        "positions": "ตำแหน่ง",
+        "exam_templates": "แม่แบบข้อสอบ",
+        "candidates": "ผู้สมัคร",
+        "exam_sessions": "เซสชันการสอบ",
+        "reports": "รายงาน",
+        "settings": "การตั้งค่า"
+    },
+    "form": {
+        "required": "จำเป็นต้องกรอก",
+        "email_invalid": "อีเมลไม่ถูกต้อง",
+        "password_min_length": "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร",
+        "save": "บันทึก",
+        "cancel": "ยกเลิก",
+        "delete": "ลบ",
+        "edit": "แก้ไข",
+        "create": "สร้าง",
+        "update": "อัพเดท"
+    },
+    "messages": {
+        "success": "สำเร็จ",
+        "error": "เกิดข้อผิดพลาด",
+        "loading": "กำลังโหลด...",
+        "no_data": "ไม่พบข้อมูล",
+        "confirm_delete": "ยืนยันการลบ?",
+        "data_saved": "บันทึกข้อมูลเรียบร้อย",
+        "data_deleted": "ลบข้อมูลเรียบร้อย"
+    },
+    "google_forms": {
+        "title": "Google Forms",
+        "import": "นำเข้าจาก Google Forms",
+        "form_id": "ID ของ Google Form",
+        "import_success": "นำเข้าข้อมูลเรียบร้อย",
+        "import_error": "เกิดข้อผิดพลาดในการนำเข้า"
+    }
+}
