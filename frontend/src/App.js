@@ -5,9 +5,12 @@ import {
   Route,
   useNavigate,
 } from "react-router-dom";
-import apiService from "./services/apiService";
+import { useTranslation } from "react-i18next";
+import apiService from "./services/api";
 import ExamInterface from "./components/ExamInterface";
 import DebugMonitoring from "./components/DebugMonitoring";
+import CandidateLogin from "./components/CandidateLogin";
+import CandidateDashboard from "./components/CandidateDashboard";
 import "./i18n/config";
 
 // Landing Page Component
@@ -41,10 +44,24 @@ function LandingPage() {
             border: "none",
             borderRadius: "4px",
             cursor: "pointer",
+            marginRight: "10px",
           }}
           onClick={() => navigate("/exam")}
         >
           เข้าสู่หน้าทำการสอบ
+        </button>
+        <button
+          style={{
+            padding: "10px 20px",
+            backgroundColor: "#4caf50",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+          onClick={() => navigate("/candidate-login")}
+        >
+          เข้าสู่ระบบผู้สมัคร
         </button>
       </div>
     </div>
@@ -141,8 +158,40 @@ function AdminPage() {
           </button>
           <button
             style={{
-              padding: "10px 15px",
+              padding: "15px 20px",
               backgroundColor: "#9c27b0",
+              color: "white",
+              border: "none",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontSize: "1em",
+              fontWeight: "bold",
+              transition: "all 0.3s ease",
+            }}
+            onClick={() => navigate("/admin/positions")}
+          >
+            💼 Position Management
+          </button>
+          <button
+            style={{
+              padding: "15px 20px",
+              backgroundColor: "#4caf50",
+              color: "white",
+              border: "none",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontSize: "1em",
+              fontWeight: "bold",
+              transition: "all 0.3s ease",
+            }}
+            onClick={() => navigate("/admin/programming-languages")}
+          >
+            💻 Programming Languages
+          </button>
+          <button
+            style={{
+              padding: "10px 15px",
+              backgroundColor: "#ff5722",
               color: "white",
               border: "none",
               borderRadius: "4px",
@@ -189,27 +238,102 @@ function AdminPage() {
 // Companies Management Page
 function CompaniesPage() {
   const navigate = useNavigate();
-  const [companies, setCompanies] = useState([
-    {
-      id: 1,
-      name: "Tech Solutions Inc",
-      description: "Software development company",
-      created_at: "2025-06-13",
-    },
-  ]);
+  const [companies, setCompanies] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingCompany, setEditingCompany] = useState(null);
   const [formData, setFormData] = useState({ name: "", description: "" });
+  const [saving, setSaving] = useState(false);
 
-  const handleSubmit = (e) => {
+  // Load companies from database on component mount
+  useEffect(() => {
+    loadCompanies();
+  }, []);
+
+  const loadCompanies = async () => {
+    try {
+      setLoading(true);
+      console.log("🔍 Loading companies from database...");
+      const response = await apiService.getCompanies();
+      console.log("✅ Companies loaded:", response);
+      setCompanies(response || []);
+    } catch (error) {
+      console.error("❌ Failed to load companies:", error);
+      alert("ไม่สามารถโหลดข้อมูลบริษัทได้");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const newCompany = {
-      id: companies.length + 1,
-      ...formData,
-      created_at: new Date().toISOString().split("T")[0],
-    };
-    setCompanies([...companies, newCompany]);
+    setSaving(true);
+
+    try {
+      if (editingCompany) {
+        // Update existing company
+        console.log("💾 Updating company in database:", formData);
+        const response = await apiService.updateCompany(
+          editingCompany.id,
+          formData
+        );
+
+        console.log("✅ Company updated:", response);
+        alert("แก้ไขบริษัทเรียบร้อยแล้ว");
+      } else {
+        // Create new company
+        console.log("💾 Saving company to database:", formData);
+        const response = await apiService.createCompany(formData);
+
+        console.log("✅ Company created:", response);
+        alert("เพิ่มบริษัทเรียบร้อยแล้ว");
+      }
+
+      // Reset form and reload companies
+      setFormData({ name: "", description: "" });
+      setShowForm(false);
+      setEditingCompany(null);
+      await loadCompanies(); // Reload from database
+    } catch (error) {
+      console.error("❌ Failed to save company:", error);
+      const action = editingCompany ? "แก้ไข" : "เพิ่ม";
+      alert(
+        `ไม่สามารถ${action}บริษัทได้: ` + (error.message || "กรุณาลองใหม่")
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editCompany = (company) => {
+    setEditingCompany(company);
+    setFormData({
+      name: company.name,
+      description: company.description || "",
+    });
+    setShowForm(true);
+  };
+
+  const cancelEdit = () => {
+    setEditingCompany(null);
     setFormData({ name: "", description: "" });
     setShowForm(false);
+  };
+
+  const deleteCompany = async (companyId) => {
+    if (!window.confirm("คุณแน่ใจหรือไม่ที่จะลบบริษัทนี้?")) return;
+
+    try {
+      console.log("🗑️ Deleting company:", companyId);
+      await apiService.deleteCompany(companyId);
+
+      console.log("✅ Company deleted");
+      alert("ลบบริษัทเรียบร้อยแล้ว");
+      await loadCompanies(); // Reload from database
+    } catch (error) {
+      console.error("❌ Failed to delete company:", error);
+      alert("ไม่สามารถลบบริษัทได้: " + (error.message || "กรุณาลองใหม่"));
+    }
   };
 
   return (
@@ -227,9 +351,15 @@ function CompaniesPage() {
             cursor: "pointer",
             marginRight: "10px",
           }}
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => {
+            if (showForm) {
+              cancelEdit();
+            } else {
+              setShowForm(true);
+            }
+          }}
         >
-          {showForm ? "Cancel" : "+ Add New Company"}
+          {showForm ? "ยกเลิก" : "+ เพิ่มบริษัทใหม่"}
         </button>
         <button
           style={{
@@ -255,7 +385,7 @@ function CompaniesPage() {
             marginBottom: "20px",
           }}
         >
-          <h3>Add New Company</h3>
+          <h3>{editingCompany ? "แก้ไขข้อมูลบริษัท" : "เพิ่มบริษัทใหม่"}</h3>
           <form onSubmit={handleSubmit}>
             <div style={{ marginBottom: "15px" }}>
               <label style={{ display: "block", marginBottom: "5px" }}>
@@ -296,16 +426,23 @@ function CompaniesPage() {
             </div>
             <button
               type="submit"
+              disabled={saving}
               style={{
                 padding: "10px 20px",
-                backgroundColor: "#1976d2",
+                backgroundColor: saving ? "#ccc" : "#1976d2",
                 color: "white",
                 border: "none",
                 borderRadius: "4px",
-                cursor: "pointer",
+                cursor: saving ? "not-allowed" : "pointer",
               }}
             >
-              Save
+              {saving
+                ? editingCompany
+                  ? "🔄 กำลังแก้ไข..."
+                  : "🔄 กำลังบันทึก..."
+                : editingCompany
+                ? "💾 แก้ไข"
+                : "💾 บันทึก"}
             </button>
           </form>
         </div>
@@ -319,128 +456,206 @@ function CompaniesPage() {
           boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
         }}
       >
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead style={{ backgroundColor: "#f5f5f5" }}>
-            <tr>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                ID
-              </th>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                Company Name
-              </th>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                Description
-              </th>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                Created Date
-              </th>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {companies.map((company) => (
-              <tr key={company.id}>
-                <td
+        {loading ? (
+          <div style={{ padding: "40px", textAlign: "center" }}>
+            <p>🔄 กำลังโหลดข้อมูลบริษัท...</p>
+          </div>
+        ) : companies.length === 0 ? (
+          <div style={{ padding: "40px", textAlign: "center" }}>
+            <p>❌ ไม่มีข้อมูลบริษัท</p>
+            <p style={{ color: "#666", fontSize: "14px" }}>
+              คลิก "เพิ่มบริษัทใหม่" เพื่อเพิ่มบริษัทแรก
+            </p>
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead style={{ backgroundColor: "#f5f5f5" }}>
+              <tr>
+                <th
                   style={{
                     padding: "15px",
-                    borderBottom: "1px solid #eee",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
                   }}
                 >
-                  {company.id}
-                </td>
-                <td
+                  ID
+                </th>
+                <th
                   style={{
                     padding: "15px",
-                    borderBottom: "1px solid #eee",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
                   }}
                 >
-                  {company.name}
-                </td>
-                <td
+                  Company Name
+                </th>
+                <th
                   style={{
                     padding: "15px",
-                    borderBottom: "1px solid #eee",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
                   }}
                 >
-                  {company.description}
-                </td>
-                <td
+                  Description
+                </th>
+                <th
                   style={{
                     padding: "15px",
-                    borderBottom: "1px solid #eee",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
                   }}
                 >
-                  {company.created_at}
-                </td>
-                <td
+                  Created Date
+                </th>
+                <th
                   style={{
                     padding: "15px",
-                    borderBottom: "1px solid #eee",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
                   }}
                 >
-                  <button
-                    style={{
-                      padding: "5px 10px",
-                      backgroundColor: "#ff9800",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "3px",
-                      cursor: "pointer",
-                      marginRight: "5px",
-                    }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    style={{
-                      padding: "5px 10px",
-                      backgroundColor: "#f44336",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "3px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Delete
-                  </button>
-                </td>
+                  Actions
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {companies.map((company) => (
+                <tr key={company.id}>
+                  <td
+                    style={{
+                      padding: "15px",
+                      borderBottom: "1px solid #eee",
+                    }}
+                  >
+                    {company.id}
+                  </td>
+                  <td
+                    style={{
+                      padding: "15px",
+                      borderBottom: "1px solid #eee",
+                    }}
+                  >
+                    {company.name}
+                  </td>
+                  <td
+                    style={{
+                      padding: "15px",
+                      borderBottom: "1px solid #eee",
+                    }}
+                  >
+                    {company.description || "ไม่มีคำอธิบาย"}
+                  </td>
+                  <td
+                    style={{
+                      padding: "15px",
+                      borderBottom: "1px solid #eee",
+                    }}
+                  >
+                    {new Date(company.created_at).toLocaleDateString("th-TH")}
+                  </td>
+                  <td
+                    style={{
+                      padding: "15px",
+                      borderBottom: "1px solid #eee",
+                    }}
+                  >
+                    <button
+                      style={{
+                        padding: "5px 10px",
+                        backgroundColor: "#ff9800",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "3px",
+                        cursor: "pointer",
+                        marginRight: "5px",
+                      }}
+                      onClick={() => editCompany(company)}
+                    >
+                      ✏️ แก้ไข
+                    </button>
+                    <button
+                      style={{
+                        padding: "5px 10px",
+                        backgroundColor: "#f44336",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "3px",
+                        cursor: "pointer",
+                      }}
+                      onClick={() => deleteCompany(company.id)}
+                    >
+                      🗑️ Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
+    </div>
+  );
+}
+
+// Component to display positions for a department
+function DepartmentPositions({ departmentId }) {
+  const [positions, setPositions] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadPositions = async () => {
+      try {
+        const response = await apiService.request(
+          `/admin/departments/${departmentId}/positions`
+        );
+        setPositions(response || []);
+      } catch (error) {
+        console.error("Failed to load department positions:", error);
+        setPositions([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadPositions();
+  }, [departmentId]);
+
+  if (loading) {
+    return (
+      <span style={{ color: "#666", fontSize: "12px" }}>กำลังโหลด...</span>
+    );
+  }
+
+  if (positions.length === 0) {
+    return (
+      <span style={{ color: "#999", fontSize: "12px" }}>ไม่มีตำแหน่ง</span>
+    );
+  }
+
+  return (
+    <div>
+      {positions.slice(0, 3).map((position, index) => (
+        <span
+          key={position.id}
+          style={{
+            display: "inline-block",
+            backgroundColor: "#e3f2fd",
+            color: "#1976d2",
+            padding: "2px 6px",
+            borderRadius: "3px",
+            fontSize: "11px",
+            marginRight: "4px",
+            marginBottom: "2px",
+          }}
+        >
+          {position.name}
+        </span>
+      ))}
+      {positions.length > 3 && (
+        <span style={{ color: "#666", fontSize: "11px" }}>
+          +{positions.length - 3} อื่นๆ
+        </span>
+      )}
     </div>
   );
 }
@@ -448,43 +663,236 @@ function CompaniesPage() {
 // Departments Management Page
 function DepartmentsPage() {
   const navigate = useNavigate();
-  const [departments, setDepartments] = useState([
-    {
-      id: 1,
-      name: "แผนกพัฒนาซอฟต์แวร์",
-      description: "พัฒนาและดูแลระบบซอฟต์แวร์",
-      company_name: "บริษัท เทคโนโลยี จำกัด",
-      company_id: 1,
-    },
-  ]);
+  const [departments, setDepartments] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [allPositions, setAllPositions] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingDepartment, setEditingDepartment] = useState(null);
+  const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     description: "",
-    company_id: 1,
+    company_id: "",
+    position_ids: [],
   });
 
-  // Mock companies data
-  const companies = [
-    { id: 1, name: "บริษัท เทคโนโลยี จำกัด" },
-    { id: 2, name: "บริษัท นวัตกรรม จำกัด" },
-    { id: 3, name: "บริษัท ดิจิทัล จำกัด" },
-  ];
+  // Load departments, companies, and positions from database on component mount
+  useEffect(() => {
+    loadDepartments();
+    loadCompanies();
+    loadAllPositions();
+  }, []);
 
-  const handleSubmit = (e) => {
+  const loadDepartments = async () => {
+    try {
+      setLoading(true);
+      console.log("🔍 Loading departments from database...");
+      const response = await apiService.getDepartments();
+      console.log("✅ Departments loaded:", response);
+      setDepartments(response || []);
+    } catch (error) {
+      console.error("❌ Failed to load departments:", error);
+      alert("ไม่สามารถโหลดข้อมูลแผนกได้");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadCompanies = async () => {
+    try {
+      console.log("🔍 Loading companies for dropdown...");
+      const response = await apiService.getCompanies();
+      console.log("✅ Companies loaded for dropdown:", response);
+      setCompanies(response || []);
+      // Set default company_id to first company if available
+      if (response && response.length > 0 && !formData.company_id) {
+        setFormData((prev) => ({
+          ...prev,
+          company_id: response[0].id.toString(),
+        }));
+      }
+    } catch (error) {
+      console.error("❌ Failed to load companies:", error);
+      alert("ไม่สามารถโหลดข้อมูลบริษัทได้");
+    }
+  };
+
+  const loadAllPositions = async () => {
+    try {
+      console.log("🔍 Loading all positions...");
+      const response = await apiService.getPositions();
+      console.log("✅ All positions loaded:", response);
+      setAllPositions(response || []);
+    } catch (error) {
+      console.error("❌ Failed to load positions:", error);
+      alert("ไม่สามารถโหลดข้อมูลตำแหน่งได้");
+    }
+  };
+
+  const updatePositionsForDepartment = async (departmentId, positionIds) => {
+    try {
+      console.log(
+        "🔄 Updating positions for department:",
+        departmentId,
+        positionIds
+      );
+
+      // Update each selected position to belong to this department
+      for (const positionId of positionIds) {
+        const position = allPositions.find((p) => p.id === positionId);
+        if (position) {
+          await apiService.request(`/admin/positions/${positionId}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              name: position.name,
+              description: position.description,
+              department_id: departmentId,
+            }),
+          });
+        }
+      }
+
+      console.log("✅ Positions updated successfully");
+    } catch (error) {
+      console.error("❌ Failed to update positions:", error);
+      throw error; // Re-throw to handle in main function
+    }
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const selectedCompany = companies.find(
-      (c) => c.id === parseInt(formData.company_id)
-    );
-    const newDepartment = {
-      id: departments.length + 1,
-      ...formData,
-      company_name: selectedCompany?.name || "ไม่ระบุ",
-      created_at: new Date().toISOString().split("T")[0],
-    };
-    setDepartments([...departments, newDepartment]);
-    setFormData({ name: "", description: "", company_id: 1 });
+    setSaving(true);
+
+    try {
+      if (editingDepartment) {
+        // Update existing department
+        console.log("💾 Updating department in database:", formData);
+        const response = await apiService.request(
+          `/admin/departments/${editingDepartment.id}`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              name: formData.name,
+              description: formData.description,
+              company_id: parseInt(formData.company_id),
+            }),
+          }
+        );
+
+        console.log("✅ Department updated:", response);
+
+        // Update positions to belong to this department
+        await updatePositionsForDepartment(
+          editingDepartment.id,
+          formData.position_ids
+        );
+
+        alert("แก้ไขแผนกเรียบร้อยแล้ว");
+      } else {
+        // Create new department
+        console.log("💾 Saving department to database:", formData);
+        const response = await apiService.request(
+          `/admin/companies/${formData.company_id}/departments`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              name: formData.name,
+              description: formData.description,
+              company_id: parseInt(formData.company_id),
+            }),
+          }
+        );
+
+        console.log("✅ Department created:", response);
+
+        // Update positions to belong to this new department
+        if (formData.position_ids.length > 0) {
+          await updatePositionsForDepartment(
+            response.id,
+            formData.position_ids
+          );
+        }
+
+        alert("เพิ่มแผนกเรียบร้อยแล้ว");
+      }
+
+      // Reset form and reload departments
+      setFormData({
+        name: "",
+        description: "",
+        company_id: companies[0]?.id?.toString() || "",
+        position_ids: [],
+      });
+      setShowForm(false);
+      setEditingDepartment(null);
+      await loadDepartments(); // Reload from database
+      await loadAllPositions(); // Reload positions to reflect changes
+    } catch (error) {
+      console.error("❌ Failed to save department:", error);
+      const action = editingDepartment ? "แก้ไข" : "เพิ่ม";
+      alert(`ไม่สามารถ${action}แผนกได้: ` + (error.message || "กรุณาลองใหม่"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editDepartment = async (department) => {
+    setEditingDepartment(department);
+
+    // Load existing positions for this department
+    let existingPositionIds = [];
+    try {
+      console.log("🔍 Loading positions for department:", department.id);
+      const response = await apiService.request(
+        `/admin/departments/${department.id}/positions`
+      );
+      existingPositionIds = response.map((pos) => pos.id);
+      console.log("✅ Existing positions loaded:", existingPositionIds);
+    } catch (error) {
+      console.error("❌ Failed to load department positions:", error);
+    }
+
+    setFormData({
+      name: department.name,
+      description: department.description || "",
+      company_id: (
+        department.company_id ||
+        department.company?.id ||
+        ""
+      ).toString(),
+      position_ids: existingPositionIds,
+    });
+    setShowForm(true);
+  };
+
+  const cancelEdit = () => {
+    setEditingDepartment(null);
+    setFormData({
+      name: "",
+      description: "",
+      company_id: companies[0]?.id?.toString() || "",
+      position_ids: [],
+    });
     setShowForm(false);
+  };
+
+  const deleteDepartment = async (departmentId) => {
+    if (!window.confirm("คุณแน่ใจหรือไม่ที่จะลบแผนกนี้?")) return;
+
+    try {
+      console.log("🗑️ Deleting department:", departmentId);
+      await apiService.request(`/admin/departments/${departmentId}`, {
+        method: "DELETE",
+      });
+
+      console.log("✅ Department deleted");
+      alert("ลบแผนกเรียบร้อยแล้ว");
+      await loadDepartments(); // Reload from database
+    } catch (error) {
+      console.error("❌ Failed to delete department:", error);
+      alert("ไม่สามารถลบแผนกได้: " + (error.message || "กรุณาลองใหม่"));
+    }
   };
 
   return (
@@ -502,7 +910,13 @@ function DepartmentsPage() {
             cursor: "pointer",
             marginRight: "10px",
           }}
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => {
+            if (showForm) {
+              cancelEdit();
+            } else {
+              setShowForm(true);
+            }
+          }}
         >
           {showForm ? "ยกเลิก" : "+ เพิ่มแผนกใหม่"}
         </button>
@@ -530,7 +944,7 @@ function DepartmentsPage() {
             marginBottom: "20px",
           }}
         >
-          <h3>เพิ่มแผนกใหม่</h3>
+          <h3>{editingDepartment ? "แก้ไขข้อมูลแผนก" : "เพิ่มแผนกใหม่"}</h3>
           <form onSubmit={handleSubmit}>
             <div style={{ marginBottom: "15px" }}>
               <label style={{ display: "block", marginBottom: "5px" }}>
@@ -595,18 +1009,97 @@ function DepartmentsPage() {
                 placeholder="อธิบายหน้าที่และความรับผิดชอบของแผนก"
               />
             </div>
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px" }}>
+                ตำแหน่งในแผนก (เลือกได้หลายตำแหน่ง):
+              </label>
+              <div
+                style={{
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                  padding: "8px",
+                  maxHeight: "150px",
+                  overflowY: "auto",
+                  backgroundColor: "white",
+                }}
+              >
+                {allPositions.length === 0 ? (
+                  <p
+                    style={{
+                      color: "#666",
+                      margin: "10px 0",
+                      textAlign: "center",
+                    }}
+                  >
+                    ไม่มีตำแหน่งให้เลือก กรุณาสร้างตำแหน่งก่อน
+                  </p>
+                ) : (
+                  allPositions.map((position) => (
+                    <div key={position.id} style={{ marginBottom: "8px" }}>
+                      <label
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={formData.position_ids.includes(position.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFormData({
+                                ...formData,
+                                position_ids: [
+                                  ...formData.position_ids,
+                                  position.id,
+                                ],
+                              });
+                            } else {
+                              setFormData({
+                                ...formData,
+                                position_ids: formData.position_ids.filter(
+                                  (id) => id !== position.id
+                                ),
+                              });
+                            }
+                          }}
+                          style={{ marginRight: "8px" }}
+                        />
+                        <span>
+                          {position.name}
+                          <small style={{ color: "#666", marginLeft: "8px" }}>
+                            ({position.department_name || "ไม่ระบุแผนก"})
+                          </small>
+                        </span>
+                      </label>
+                    </div>
+                  ))
+                )}
+              </div>
+              <small style={{ color: "#666", fontSize: "12px" }}>
+                หมายเหตุ: ตำแหน่งที่เลือกจะถูกเชื่อมโยงกับแผนกนี้
+              </small>
+            </div>
             <button
               type="submit"
+              disabled={saving}
               style={{
                 padding: "10px 20px",
-                backgroundColor: "#1976d2",
+                backgroundColor: saving ? "#ccc" : "#1976d2",
                 color: "white",
                 border: "none",
                 borderRadius: "4px",
-                cursor: "pointer",
+                cursor: saving ? "not-allowed" : "pointer",
               }}
             >
-              บันทึก
+              {saving
+                ? editingDepartment
+                  ? "🔄 กำลังแก้ไข..."
+                  : "🔄 กำลังบันทึก..."
+                : editingDepartment
+                ? "💾 แก้ไข"
+                : "💾 บันทึก"}
             </button>
           </form>
         </div>
@@ -620,66 +1113,1154 @@ function DepartmentsPage() {
           boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
         }}
       >
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead style={{ backgroundColor: "#f5f5f5" }}>
-            <tr>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                ID
-              </th>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                ชื่อแผนก
-              </th>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                คำอธิบาย
-              </th>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                บริษัท
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {departments.map((dept) => (
-              <tr key={dept.id}>
-                <td style={{ padding: "15px", borderBottom: "1px solid #eee" }}>
-                  {dept.id}
-                </td>
-                <td style={{ padding: "15px", borderBottom: "1px solid #eee" }}>
-                  {dept.name}
-                </td>
-                <td style={{ padding: "15px", borderBottom: "1px solid #eee" }}>
-                  {dept.description}
-                </td>
-                <td style={{ padding: "15px", borderBottom: "1px solid #eee" }}>
-                  {dept.company_name}
-                </td>
+        {loading ? (
+          <div style={{ padding: "40px", textAlign: "center" }}>
+            <p>🔄 กำลังโหลดข้อมูลแผนก...</p>
+          </div>
+        ) : departments.length === 0 ? (
+          <div style={{ padding: "40px", textAlign: "center" }}>
+            <p>❌ ไม่มีข้อมูลแผนก</p>
+            <p style={{ color: "#666", fontSize: "14px" }}>
+              คลิก "เพิ่มแผนกใหม่" เพื่อเพิ่มแผนกแรก
+            </p>
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead style={{ backgroundColor: "#f5f5f5" }}>
+              <tr>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  ID
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  ชื่อแผนก
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  คำอธิบาย
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  บริษัท
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  ตำแหน่ง
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  การจัดการ
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {departments.map((dept) => (
+                <tr key={dept.id}>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {dept.id}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {dept.name}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {dept.description || "ไม่มีคำอธิบาย"}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {dept.company_name || dept.company?.name || "ไม่ระบุบริษัท"}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    <DepartmentPositions departmentId={dept.id} />
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    <button
+                      style={{
+                        padding: "5px 10px",
+                        backgroundColor: "#ff9800",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "3px",
+                        cursor: "pointer",
+                        marginRight: "5px",
+                      }}
+                      onClick={() => editDepartment(dept)}
+                    >
+                      ✏️ แก้ไข
+                    </button>
+                    <button
+                      style={{
+                        padding: "5px 10px",
+                        backgroundColor: "#f44336",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "3px",
+                        cursor: "pointer",
+                      }}
+                      onClick={() => deleteDepartment(dept.id)}
+                    >
+                      🗑️ ลบ
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Positions Management Page
+function PositionsPage() {
+  const navigate = useNavigate();
+  const [positions, setPositions] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [programmingLanguages, setProgrammingLanguages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingPosition, setEditingPosition] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [formData, setFormData] = useState({
+    name: "",
+    description: "",
+    department_id: "",
+    programming_language_id: "",
+  });
+
+  // Load positions, departments, and programming languages from database on component mount
+  useEffect(() => {
+    loadPositions();
+    loadDepartments();
+    loadProgrammingLanguages();
+  }, []);
+
+  const loadPositions = async () => {
+    try {
+      setLoading(true);
+      console.log("🔍 Loading positions from database...");
+      const response = await apiService.getPositions();
+      console.log("✅ Positions loaded:", response);
+      setPositions(response || []);
+    } catch (error) {
+      console.error("❌ Failed to load positions:", error);
+      alert("ไม่สามารถโหลดข้อมูลตำแหน่งได้");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadDepartments = async () => {
+    try {
+      console.log("🔍 Loading departments for dropdown...");
+      const response = await apiService.getDepartments();
+      console.log("✅ Departments loaded for dropdown:", response);
+      setDepartments(response || []);
+      // Set default department_id to first department if available
+      if (response && response.length > 0 && !formData.department_id) {
+        setFormData((prev) => ({
+          ...prev,
+          department_id: response[0].id.toString(),
+        }));
+      }
+    } catch (error) {
+      console.error("❌ Failed to load departments:", error);
+      alert("ไม่สามารถโหลดข้อมูลแผนกได้");
+    }
+  };
+
+  const loadProgrammingLanguages = async () => {
+    try {
+      console.log("🔍 Loading programming languages for dropdown...");
+      const response = await apiService.request(
+        "/api/v1/admin/programming-languages?active_only=true"
+      );
+      console.log("✅ Programming languages loaded for dropdown:", response);
+      setProgrammingLanguages(response || []);
+    } catch (error) {
+      console.error("❌ Failed to load programming languages:", error);
+      alert("ไม่สามารถโหลดข้อมูลภาษาโปรแกรมมิ่งได้");
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+
+    try {
+      if (editingPosition) {
+        // Update existing position
+        console.log("💾 Updating position in database:", formData);
+        const response = await apiService.request(
+          `/admin/positions/${editingPosition.id}`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              name: formData.name,
+              description: formData.description,
+              department_id: parseInt(formData.department_id),
+              programming_language_id: formData.programming_language_id
+                ? parseInt(formData.programming_language_id)
+                : null,
+            }),
+          }
+        );
+
+        console.log("✅ Position updated:", response);
+        alert("แก้ไขตำแหน่งเรียบร้อยแล้ว");
+      } else {
+        // Create new position
+        console.log("💾 Saving position to database:", formData);
+        const response = await apiService.request(
+          `/admin/departments/${formData.department_id}/positions`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              name: formData.name,
+              description: formData.description,
+              department_id: parseInt(formData.department_id),
+              programming_language_id: formData.programming_language_id
+                ? parseInt(formData.programming_language_id)
+                : null,
+            }),
+          }
+        );
+
+        console.log("✅ Position created:", response);
+        alert("เพิ่มตำแหน่งเรียบร้อยแล้ว");
+      }
+
+      // Reset form and reload positions
+      setFormData({
+        name: "",
+        description: "",
+        department_id: departments[0]?.id?.toString() || "",
+        programming_language_id: "",
+      });
+      setShowForm(false);
+      setEditingPosition(null);
+      await loadPositions(); // Reload from database
+    } catch (error) {
+      console.error("❌ Failed to save position:", error);
+      const action = editingPosition ? "แก้ไข" : "เพิ่ม";
+      alert(
+        `ไม่สามารถ${action}ตำแหน่งได้: ` + (error.message || "กรุณาลองใหม่")
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editPosition = (position) => {
+    setEditingPosition(position);
+    setFormData({
+      name: position.name,
+      description: position.description || "",
+      department_id: (
+        position.department_id ||
+        position.department?.id ||
+        ""
+      ).toString(),
+      programming_language_id: (
+        position.programming_language_id || ""
+      ).toString(),
+    });
+    setShowForm(true);
+  };
+
+  const cancelEdit = () => {
+    setEditingPosition(null);
+    setFormData({
+      name: "",
+      description: "",
+      department_id: departments[0]?.id?.toString() || "",
+      programming_language_id: "",
+    });
+    setShowForm(false);
+  };
+
+  const deletePosition = async (positionId) => {
+    if (!window.confirm("คุณแน่ใจหรือไม่ที่จะลบตำแหน่งนี้?")) return;
+
+    try {
+      console.log("🗑️ Deleting position:", positionId);
+      await apiService.request(`/admin/positions/${positionId}`, {
+        method: "DELETE",
+      });
+
+      console.log("✅ Position deleted");
+      alert("ลบตำแหน่งเรียบร้อยแล้ว");
+      await loadPositions(); // Reload from database
+    } catch (error) {
+      console.error("❌ Failed to delete position:", error);
+      alert("ไม่สามารถลบตำแหน่งได้: " + (error.message || "กรุณาลองใหม่"));
+    }
+  };
+
+  return (
+    <div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
+      <h1>💼 จัดการตำแหน่งงาน</h1>
+
+      <div style={{ marginBottom: "20px" }}>
+        <button
+          style={{
+            padding: "10px 20px",
+            backgroundColor: "#9c27b0",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+            marginRight: "10px",
+          }}
+          onClick={() => {
+            if (showForm) {
+              cancelEdit();
+            } else {
+              setShowForm(true);
+            }
+          }}
+        >
+          {showForm ? "ยกเลิก" : "+ เพิ่มตำแหน่งใหม่"}
+        </button>
+        <button
+          style={{
+            padding: "10px 20px",
+            backgroundColor: "#666",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+          onClick={() => navigate("/admin")}
+        >
+          ← กลับ
+        </button>
+      </div>
+
+      {showForm && (
+        <div
+          style={{
+            padding: "20px",
+            backgroundColor: "#f5f5f5",
+            borderRadius: "8px",
+            marginBottom: "20px",
+          }}
+        >
+          <h3>{editingPosition ? "แก้ไขข้อมูลตำแหน่ง" : "เพิ่มตำแหน่งใหม่"}</h3>
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px" }}>
+                เลือกแผนก:
+              </label>
+              <select
+                value={formData.department_id}
+                onChange={(e) =>
+                  setFormData({ ...formData, department_id: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "4px",
+                  border: "1px solid #ddd",
+                }}
+                required
+              >
+                {departments.map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.name} (
+                    {department.company_name ||
+                      department.company?.name ||
+                      "ไม่ระบุบริษัท"}
+                    )
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px" }}>
+                ภาษาโปรแกรมมิ่งที่ต้องการ (ไม่บังคับ):
+              </label>
+              <select
+                value={formData.programming_language_id}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    programming_language_id: e.target.value,
+                  })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "4px",
+                  border: "1px solid #ddd",
+                }}
+              >
+                <option value="">ไม่ระบุภาษาโปรแกรมมิ่ง</option>
+                {programmingLanguages.map((language) => (
+                  <option key={language.id} value={language.id}>
+                    {language.name}{" "}
+                    {language.version ? `(${language.version})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px" }}>
+                ชื่อตำแหน่ง:
+              </label>
+              <input
+                type="text"
+                value={formData.name}
+                onChange={(e) =>
+                  setFormData({ ...formData, name: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "4px",
+                  border: "1px solid #ddd",
+                }}
+                placeholder="เช่น นักพัฒนาซอฟต์แวร์, นักวิเคราะห์ระบบ, ผู้จัดการโครงการ"
+                required
+              />
+            </div>
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px" }}>
+                คำอธิบาย:
+              </label>
+              <textarea
+                value={formData.description}
+                onChange={(e) =>
+                  setFormData({ ...formData, description: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "4px",
+                  border: "1px solid #ddd",
+                  height: "80px",
+                }}
+                placeholder="อธิบายหน้าที่และความรับผิดชอบของตำแหน่ง"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                padding: "10px 20px",
+                backgroundColor: saving ? "#ccc" : "#1976d2",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: saving ? "not-allowed" : "pointer",
+              }}
+            >
+              {saving
+                ? editingPosition
+                  ? "🔄 กำลังแก้ไข..."
+                  : "🔄 กำลังบันทึก..."
+                : editingPosition
+                ? "💾 แก้ไข"
+                : "💾 บันทึก"}
+            </button>
+          </form>
+        </div>
+      )}
+
+      <div
+        style={{
+          backgroundColor: "white",
+          borderRadius: "8px",
+          overflow: "hidden",
+          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+        }}
+      >
+        {loading ? (
+          <div style={{ padding: "40px", textAlign: "center" }}>
+            <p>🔄 กำลังโหลดข้อมูลตำแหน่ง...</p>
+          </div>
+        ) : positions.length === 0 ? (
+          <div style={{ padding: "40px", textAlign: "center" }}>
+            <p>❌ ไม่มีข้อมูลตำแหน่ง</p>
+            <p style={{ color: "#666", fontSize: "14px" }}>
+              คลิก "เพิ่มตำแหน่งใหม่" เพื่อเพิ่มตำแหน่งแรก
+            </p>
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead style={{ backgroundColor: "#f5f5f5" }}>
+              <tr>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  ID
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  ชื่อตำแหน่ง
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  คำอธิบาย
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  แผนก
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  บริษัท
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  ภาษาโปรแกรมมิ่ง
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  การจัดการ
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {positions.map((position) => (
+                <tr key={position.id}>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {position.id}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {position.name}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {position.description || "ไม่มีคำอธิบาย"}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {position.department_name || "ไม่ระบุแผนก"}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {position.company_name || "ไม่ระบุบริษัท"}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {position.programming_language_name ? (
+                      <span
+                        style={{
+                          backgroundColor: "#e3f2fd",
+                          color: "#1976d2",
+                          padding: "4px 8px",
+                          borderRadius: "12px",
+                          fontSize: "12px",
+                        }}
+                      >
+                        {position.programming_language_name}
+                        {position.programming_language_version &&
+                          ` (${position.programming_language_version})`}
+                      </span>
+                    ) : (
+                      <span style={{ color: "#999", fontSize: "12px" }}>
+                        ไม่ระบุ
+                      </span>
+                    )}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    <button
+                      style={{
+                        padding: "5px 10px",
+                        backgroundColor: "#ff9800",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "3px",
+                        cursor: "pointer",
+                        marginRight: "5px",
+                      }}
+                      onClick={() => editPosition(position)}
+                    >
+                      ✏️ แก้ไข
+                    </button>
+                    <button
+                      style={{
+                        padding: "5px 10px",
+                        backgroundColor: "#f44336",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "3px",
+                        cursor: "pointer",
+                      }}
+                      onClick={() => deletePosition(position.id)}
+                    >
+                      🗑️ ลบ
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Programming Languages Management Page
+function ProgrammingLanguagesPage() {
+  const navigate = useNavigate();
+  const [programmingLanguages, setProgrammingLanguages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingLanguage, setEditingLanguage] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [formData, setFormData] = useState({
+    name: "",
+    description: "",
+    version: "",
+    is_active: true,
+  });
+
+  // Load programming languages from database on component mount
+  useEffect(() => {
+    loadProgrammingLanguages();
+  }, []);
+
+  const loadProgrammingLanguages = async () => {
+    try {
+      setLoading(true);
+      console.log("🔍 Loading programming languages from database...");
+      const response = await apiService.getProgrammingLanguages();
+      console.log("✅ Programming languages loaded:", response);
+      setProgrammingLanguages(response || []);
+    } catch (error) {
+      console.error("❌ Failed to load programming languages:", error);
+      alert("ไม่สามารถโหลดข้อมูลภาษาโปรแกรมมิ่งได้");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+
+    try {
+      if (editingLanguage) {
+        // Update existing programming language
+        console.log("💾 Updating programming language in database:", formData);
+        const response = await apiService.request(
+          `/admin/programming-languages/${editingLanguage.id}`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              name: formData.name,
+              description: formData.description,
+              version: formData.version,
+              is_active: formData.is_active,
+            }),
+          }
+        );
+
+        console.log("✅ Programming language updated:", response);
+        alert("แก้ไขภาษาโปรแกรมมิ่งเรียบร้อยแล้ว");
+      } else {
+        // Create new programming language
+        console.log("💾 Saving programming language to database:", formData);
+        const response = await apiService.request(
+          "/admin/programming-languages",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              name: formData.name,
+              description: formData.description,
+              version: formData.version,
+              is_active: formData.is_active,
+            }),
+          }
+        );
+
+        console.log("✅ Programming language created:", response);
+        alert("เพิ่มภาษาโปรแกรมมิ่งเรียบร้อยแล้ว");
+      }
+
+      // Reset form and reload programming languages
+      setFormData({
+        name: "",
+        description: "",
+        version: "",
+        is_active: true,
+      });
+      setShowForm(false);
+      setEditingLanguage(null);
+      await loadProgrammingLanguages(); // Reload from database
+    } catch (error) {
+      console.error("❌ Failed to save programming language:", error);
+      const action = editingLanguage ? "แก้ไข" : "เพิ่ม";
+      alert(
+        `ไม่สามารถ${action}ภาษาโปรแกรมมิ่งได้: ` +
+          (error.message || "กรุณาลองใหม่")
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editLanguage = (language) => {
+    setEditingLanguage(language);
+    setFormData({
+      name: language.name,
+      description: language.description || "",
+      version: language.version || "",
+      is_active: language.is_active,
+    });
+    setShowForm(true);
+  };
+
+  const cancelEdit = () => {
+    setEditingLanguage(null);
+    setFormData({
+      name: "",
+      description: "",
+      version: "",
+      is_active: true,
+    });
+    setShowForm(false);
+  };
+
+  const deleteLanguage = async (languageId) => {
+    if (!window.confirm("คุณแน่ใจหรือไม่ที่จะลบภาษาโปรแกรมมิ่งนี้?")) return;
+
+    try {
+      console.log("🗑️ Deleting programming language:", languageId);
+      await apiService.request(`/admin/programming-languages/${languageId}`, {
+        method: "DELETE",
+      });
+
+      console.log("✅ Programming language deleted");
+      alert("ลบภาษาโปรแกรมมิ่งเรียบร้อยแล้ว");
+      await loadProgrammingLanguages(); // Reload from database
+    } catch (error) {
+      console.error("❌ Failed to delete programming language:", error);
+      alert(
+        "ไม่สามารถลบภาษาโปรแกรมมิ่งได้: " + (error.message || "กรุณาลองใหม่")
+      );
+    }
+  };
+
+  return (
+    <div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
+      <h1>💻 จัดการภาษาโปรแกรมมิ่ง</h1>
+
+      <div style={{ marginBottom: "20px" }}>
+        <button
+          style={{
+            padding: "10px 20px",
+            backgroundColor: "#4caf50",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+            marginRight: "10px",
+          }}
+          onClick={() => {
+            if (showForm) {
+              cancelEdit();
+            } else {
+              setShowForm(true);
+            }
+          }}
+        >
+          {showForm ? "ยกเลิก" : "+ เพิ่มภาษาโปรแกรมมิ่งใหม่"}
+        </button>
+        <button
+          style={{
+            padding: "10px 20px",
+            backgroundColor: "#666",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+          onClick={() => navigate("/admin")}
+        >
+          ← กลับ
+        </button>
+      </div>
+
+      {showForm && (
+        <div
+          style={{
+            padding: "20px",
+            backgroundColor: "#f5f5f5",
+            borderRadius: "8px",
+            marginBottom: "20px",
+          }}
+        >
+          <h3>
+            {editingLanguage
+              ? "แก้ไขข้อมูลภาษาโปรแกรมมิ่ง"
+              : "เพิ่มภาษาโปรแกรมมิ่งใหม่"}
+          </h3>
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px" }}>
+                ชื่อภาษาโปรแกรมมิ่ง:
+              </label>
+              <input
+                type="text"
+                value={formData.name}
+                onChange={(e) =>
+                  setFormData({ ...formData, name: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "4px",
+                  border: "1px solid #ddd",
+                }}
+                placeholder="เช่น Python, JavaScript, Java, C#, Go"
+                required
+              />
+            </div>
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px" }}>
+                เวอร์ชัน:
+              </label>
+              <input
+                type="text"
+                value={formData.version}
+                onChange={(e) =>
+                  setFormData({ ...formData, version: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "4px",
+                  border: "1px solid #ddd",
+                }}
+                placeholder="เช่น 3.9, ES6, 11, .NET 6"
+              />
+            </div>
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px" }}>
+                คำอธิบาย:
+              </label>
+              <textarea
+                value={formData.description}
+                onChange={(e) =>
+                  setFormData({ ...formData, description: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "4px",
+                  border: "1px solid #ddd",
+                  height: "80px",
+                }}
+                placeholder="อธิบายเกี่ยวกับภาษาโปรแกรมมิ่งนี้"
+              />
+            </div>
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "flex", alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={formData.is_active}
+                  onChange={(e) =>
+                    setFormData({ ...formData, is_active: e.target.checked })
+                  }
+                  style={{ marginRight: "8px" }}
+                />
+                เปิดใช้งาน
+              </label>
+            </div>
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                padding: "10px 20px",
+                backgroundColor: saving ? "#ccc" : "#1976d2",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: saving ? "not-allowed" : "pointer",
+              }}
+            >
+              {saving
+                ? editingLanguage
+                  ? "🔄 กำลังแก้ไข..."
+                  : "🔄 กำลังบันทึก..."
+                : editingLanguage
+                ? "💾 แก้ไข"
+                : "💾 บันทึก"}
+            </button>
+          </form>
+        </div>
+      )}
+
+      <div
+        style={{
+          backgroundColor: "white",
+          borderRadius: "8px",
+          overflow: "hidden",
+          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+        }}
+      >
+        {loading ? (
+          <div style={{ padding: "40px", textAlign: "center" }}>
+            <p>🔄 กำลังโหลดข้อมูลภาษาโปรแกรมมิ่ง...</p>
+          </div>
+        ) : programmingLanguages.length === 0 ? (
+          <div style={{ padding: "40px", textAlign: "center" }}>
+            <p>❌ ไม่มีข้อมูลภาษาโปรแกรมมิ่ง</p>
+            <p style={{ color: "#666", fontSize: "14px" }}>
+              คลิก "เพิ่มภาษาโปรแกรมมิ่งใหม่" เพื่อเพิ่มภาษาแรก
+            </p>
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead style={{ backgroundColor: "#f5f5f5" }}>
+              <tr>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  ID
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  ชื่อภาษา
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  เวอร์ชัน
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  คำอธิบาย
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  จำนวนตำแหน่ง
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  สถานะ
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  การจัดการ
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {programmingLanguages.map((language) => (
+                <tr key={language.id}>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {language.id}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {language.name}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {language.version || "ไม่ระบุ"}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {language.description || "ไม่มีคำอธิบาย"}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    <span
+                      style={{
+                        backgroundColor:
+                          language.position_count > 0 ? "#e8f5e8" : "#f5f5f5",
+                        color: language.position_count > 0 ? "#2e7d32" : "#666",
+                        padding: "4px 8px",
+                        borderRadius: "12px",
+                        fontSize: "12px",
+                      }}
+                    >
+                      {language.position_count} ตำแหน่ง
+                    </span>
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    <span
+                      style={{
+                        backgroundColor: language.is_active
+                          ? "#e8f5e8"
+                          : "#ffebee",
+                        color: language.is_active ? "#2e7d32" : "#c62828",
+                        padding: "4px 8px",
+                        borderRadius: "12px",
+                        fontSize: "12px",
+                      }}
+                    >
+                      {language.is_active ? "เปิดใช้งาน" : "ปิดใช้งาน"}
+                    </span>
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    <button
+                      style={{
+                        padding: "5px 10px",
+                        backgroundColor: "#ff9800",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "3px",
+                        cursor: "pointer",
+                        marginRight: "5px",
+                      }}
+                      onClick={() => editLanguage(language)}
+                    >
+                      ✏️ แก้ไข
+                    </button>
+                    <button
+                      style={{
+                        padding: "5px 10px",
+                        backgroundColor: "#f44336",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "3px",
+                        cursor: "pointer",
+                      }}
+                      onClick={() => deleteLanguage(language.id)}
+                    >
+                      🗑️ ลบ
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
@@ -733,7 +2314,7 @@ function ExamsPage() {
   const loadExams = async () => {
     try {
       setLoading(true);
-      const response = await apiService.request("/admin/exam-templates");
+      const response = await apiService.getExamTemplates();
       console.log("📚 Loaded exams response:", response);
       console.log("📋 Exams data:", response.data);
       console.log("🔢 Number of exams:", response.data?.length);
@@ -764,7 +2345,7 @@ function ExamsPage() {
     try {
       console.log("🔍 Loading exam details for ID:", examId);
       const response = await apiService.request(
-        `/admin/exam-templates/${examId}`
+        `/api/v1/admin/exam-templates/${examId}`
       );
       console.log("📋 Exam details response:", response);
       console.log("📝 Questions data:", response.data?.questions);
@@ -808,9 +2389,7 @@ function ExamsPage() {
     if (!window.confirm("Are you sure you want to delete this exam?")) return;
 
     try {
-      await apiService.request(`/admin/exam-templates/${examId}`, {
-        method: "DELETE",
-      });
+      await apiService.deleteExamTemplate(examId);
       alert("Exam deleted successfully");
       loadExams(); // Reload the list
     } catch (error) {
@@ -880,7 +2459,7 @@ function ExamsPage() {
       console.log("📝 AI Config to send:", aiConfig);
 
       const response = await apiService.request(
-        "/admin/exam-templates/generate-ai",
+        "/api/v1/admin/exam-templates/generate-ai",
         {
           method: "POST",
           body: JSON.stringify(aiConfig),
@@ -1848,84 +3427,92 @@ function ExamsPage() {
 // Candidates Management Page
 function CandidatesPage() {
   const navigate = useNavigate();
-  const [candidates, setCandidates] = useState([
-    {
-      id: 1,
-      first_name: "สมชาย",
-      last_name: "ใจดี",
-      email: "somchai@email.com",
-      phone: "081-234-5678",
-      position: "นักพัฒนาซอฟต์แวร์",
-      status: "ผ่านการสอบ",
-      created_at: "2025-06-13",
-    },
-    {
-      id: 2,
-      first_name: "สมหญิง",
-      last_name: "รักงาน",
-      email: "somying@email.com",
-      phone: "082-345-6789",
-      position: "นักออกแบบ UI/UX",
-      status: "ผ่านการสอบ",
-      created_at: "2025-06-12",
-    },
-    {
-      id: 3,
-      first_name: "สมศักดิ์",
-      last_name: "ขยันเรียน",
-      email: "somsak@email.com",
-      phone: "083-456-7890",
-      position: "นักวิเคราะห์ระบบ",
-      status: "รอสอบ",
-      created_at: "2025-06-11",
-    },
-  ]);
+  const { t } = useTranslation();
+  const [candidates, setCandidates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  const [showAssignForm, setShowAssignForm] = useState(false);
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [formData, setFormData] = useState({
     first_name: "",
     last_name: "",
     email: "",
     phone: "",
-    position: "",
-    status: "รอสอบ",
   });
 
-  // Mock positions data
-  const positions = [
-    "นักพัฒนาซอฟต์แวร์",
-    "นักวิเคราะห์ระบบ",
-    "นักออกแบบ UI/UX",
-    "นักการตลาดดิจิทัล",
-    "เจ้าหน้าที่บุคคล",
-    "นักบัญชี",
-    "ผู้จัดการโครงการ",
-  ];
+  // Assignment form data
+  const [assignmentData, setAssignmentData] = useState({
+    candidate_id: "",
+    exam_template_id: "",
+    position_id: "",
+    programming_language_id: "",
+    start_time: "",
+  });
 
-  const statusOptions = [
-    "รอสอบ",
-    "กำลังสอบ",
-    "ผ่านการสอบ",
-    "ไม่ผ่านการสอบ",
-    "ยกเลิก",
-  ];
+  // Options for dropdowns
+  const [examTemplates, setExamTemplates] = useState([]);
+  const [positions, setPositions] = useState([]);
+  const [programmingLanguages, setProgrammingLanguages] = useState([]);
 
-  const handleSubmit = (e) => {
+  // Load candidates from API
+  const loadCandidates = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await apiService.getCandidates();
+      setCandidates(response);
+    } catch (error) {
+      console.error("Error loading candidates:", error);
+      setError(t("candidates.error_loading"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load candidates on component mount
+  useEffect(() => {
+    loadCandidates();
+    loadAssignmentOptions();
+  }, []);
+
+  // Load options for assignment dropdowns
+  const loadAssignmentOptions = async () => {
+    try {
+      const [examsResponse, positionsResponse, languagesResponse] =
+        await Promise.all([
+          apiService.getAvailableExamTemplates(),
+          apiService.getPositions(),
+          apiService.getProgrammingLanguages(),
+        ]);
+
+      setExamTemplates(examsResponse || []);
+      setPositions(positionsResponse || []);
+      setProgrammingLanguages(languagesResponse || []);
+    } catch (error) {
+      console.error("Error loading assignment options:", error);
+    }
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const newCandidate = {
-      id: candidates.length + 1,
-      ...formData,
-      created_at: new Date().toISOString().split("T")[0],
-    };
-    setCandidates([...candidates, newCandidate]);
-    setFormData({
-      first_name: "",
-      last_name: "",
-      email: "",
-      phone: "",
-      position: "",
-      status: "รอสอบ",
-    });
-    setShowForm(false);
+    try {
+      await apiService.createCandidate(formData);
+      setFormData({
+        first_name: "",
+        last_name: "",
+        email: "",
+        phone: "",
+      });
+      setShowForm(false);
+      // Reload candidates list
+      await loadCandidates();
+      // Show success message (could be enhanced with toast notification)
+      alert(t("candidates.create_success"));
+    } catch (error) {
+      console.error("Error creating candidate:", error);
+      alert(error.message || t("candidates.create_error"));
+    }
   };
 
   const getStatusColor = (status) => {
@@ -1945,9 +3532,71 @@ function CandidatesPage() {
     }
   };
 
+  // Assignment functions
+  const openAssignmentForm = (candidate) => {
+    setSelectedCandidate(candidate);
+    setAssignmentData({
+      candidate_id: candidate.id,
+      exam_template_id: "",
+      position_id: "",
+      programming_language_id: "",
+      start_time: "",
+    });
+    setShowAssignForm(true);
+  };
+
+  const closeAssignmentForm = () => {
+    setShowAssignForm(false);
+    setSelectedCandidate(null);
+    setAssignmentData({
+      candidate_id: "",
+      exam_template_id: "",
+      position_id: "",
+      programming_language_id: "",
+      start_time: "",
+    });
+  };
+
+  const handleAssignmentSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      // Assign exam if selected
+      if (assignmentData.exam_template_id) {
+        await apiService.assignExamToCandidate({
+          candidate_id: assignmentData.candidate_id,
+          exam_template_id: parseInt(assignmentData.exam_template_id),
+          start_time: assignmentData.start_time || undefined,
+        });
+      }
+
+      // Update candidate with position if selected
+      if (assignmentData.position_id) {
+        await apiService.updateCandidate(assignmentData.candidate_id, {
+          position_id: parseInt(assignmentData.position_id),
+        });
+      }
+
+      // Update candidate with programming language if selected
+      if (assignmentData.programming_language_id) {
+        await apiService.updateCandidate(assignmentData.candidate_id, {
+          programming_language_id: parseInt(
+            assignmentData.programming_language_id
+          ),
+        });
+      }
+
+      alert(t("candidates.assignment_success"));
+      closeAssignmentForm();
+      await loadCandidates(); // Reload to see updates
+    } catch (error) {
+      console.error("Error assigning to candidate:", error);
+      alert(error.message || t("candidates.assignment_error"));
+    }
+  };
+
   return (
     <div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
-      <h1>👥 จัดการผู้สมัคร</h1>
+      <h1>👥 {t("candidates.title")}</h1>
 
       <div style={{ marginBottom: "20px" }}>
         <button
@@ -1962,7 +3611,7 @@ function CandidatesPage() {
           }}
           onClick={() => setShowForm(!showForm)}
         >
-          {showForm ? "ยกเลิก" : "+ เพิ่มผู้สมัครใหม่"}
+          {showForm ? t("candidates.cancel") : `+ ${t("candidates.add_new")}`}
         </button>
         <button
           style={{
@@ -1975,7 +3624,7 @@ function CandidatesPage() {
           }}
           onClick={() => navigate("/admin")}
         >
-          ← กลับ
+          ← {t("candidates.back")}
         </button>
       </div>
 
@@ -1988,7 +3637,7 @@ function CandidatesPage() {
             marginBottom: "20px",
           }}
         >
-          <h3>เพิ่มผู้สมัครใหม่</h3>
+          <h3>{t("candidates.add_new_candidate")}</h3>
           <form onSubmit={handleSubmit}>
             <div
               style={{
@@ -2000,7 +3649,7 @@ function CandidatesPage() {
             >
               <div>
                 <label style={{ display: "block", marginBottom: "5px" }}>
-                  ชื่อ:
+                  {t("candidates.first_name")}:
                 </label>
                 <input
                   type="text"
@@ -2014,13 +3663,13 @@ function CandidatesPage() {
                     borderRadius: "4px",
                     border: "1px solid #ddd",
                   }}
-                  placeholder="ชื่อจริง"
+                  placeholder={t("candidates.first_name_placeholder")}
                   required
                 />
               </div>
               <div>
                 <label style={{ display: "block", marginBottom: "5px" }}>
-                  นามสกุล:
+                  {t("candidates.last_name")}:
                 </label>
                 <input
                   type="text"
@@ -2034,7 +3683,7 @@ function CandidatesPage() {
                     borderRadius: "4px",
                     border: "1px solid #ddd",
                   }}
-                  placeholder="นามสกุล"
+                  placeholder={t("candidates.last_name_placeholder")}
                   required
                 />
               </div>
@@ -2049,7 +3698,7 @@ function CandidatesPage() {
             >
               <div>
                 <label style={{ display: "block", marginBottom: "5px" }}>
-                  อีเมล:
+                  {t("candidates.email")}:
                 </label>
                 <input
                   type="email"
@@ -2063,13 +3712,13 @@ function CandidatesPage() {
                     borderRadius: "4px",
                     border: "1px solid #ddd",
                   }}
-                  placeholder="example@email.com"
+                  placeholder={t("candidates.email_placeholder")}
                   required
                 />
               </div>
               <div>
                 <label style={{ display: "block", marginBottom: "5px" }}>
-                  เบอร์โทรศัพท์:
+                  {t("candidates.phone")}:
                 </label>
                 <input
                   type="tel"
@@ -2083,66 +3732,8 @@ function CandidatesPage() {
                     borderRadius: "4px",
                     border: "1px solid #ddd",
                   }}
-                  placeholder="081-234-5678"
-                  required
+                  placeholder={t("candidates.phone_placeholder")}
                 />
-              </div>
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "15px",
-                marginBottom: "15px",
-              }}
-            >
-              <div>
-                <label style={{ display: "block", marginBottom: "5px" }}>
-                  ตำแหน่งที่สมัคร:
-                </label>
-                <select
-                  value={formData.position}
-                  onChange={(e) =>
-                    setFormData({ ...formData, position: e.target.value })
-                  }
-                  style={{
-                    width: "100%",
-                    padding: "8px",
-                    borderRadius: "4px",
-                    border: "1px solid #ddd",
-                  }}
-                  required
-                >
-                  <option value="">เลือกตำแหน่ง</option>
-                  {positions.map((position) => (
-                    <option key={position} value={position}>
-                      {position}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label style={{ display: "block", marginBottom: "5px" }}>
-                  สถานะ:
-                </label>
-                <select
-                  value={formData.status}
-                  onChange={(e) =>
-                    setFormData({ ...formData, status: e.target.value })
-                  }
-                  style={{
-                    width: "100%",
-                    padding: "8px",
-                    borderRadius: "4px",
-                    border: "1px solid #ddd",
-                  }}
-                >
-                  {statusOptions.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
               </div>
             </div>
             <button
@@ -2156,148 +3747,408 @@ function CandidatesPage() {
                 cursor: "pointer",
               }}
             >
-              บันทึก
+              {t("form.save")}
             </button>
           </form>
         </div>
       )}
 
-      <div
-        style={{
-          backgroundColor: "white",
-          borderRadius: "8px",
-          overflow: "hidden",
-          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-        }}
-      >
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead style={{ backgroundColor: "#f5f5f5" }}>
-            <tr>
-              <th
+      {/* Assignment Form */}
+      {showAssignForm && selectedCandidate && (
+        <div
+          style={{
+            padding: "20px",
+            backgroundColor: "#e3f2fd",
+            borderRadius: "8px",
+            marginBottom: "20px",
+            border: "2px solid #2196f3",
+          }}
+        >
+          <h3>
+            🎯 {t("candidates.assign_to")} {selectedCandidate.first_name}{" "}
+            {selectedCandidate.last_name}
+          </h3>
+          <form onSubmit={handleAssignmentSubmit}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "15px",
+                marginBottom: "15px",
+              }}
+            >
+              <div>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  {t("candidates.assign_exam")}:
+                </label>
+                <select
+                  value={assignmentData.exam_template_id}
+                  onChange={(e) =>
+                    setAssignmentData({
+                      ...assignmentData,
+                      exam_template_id: e.target.value,
+                    })
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ddd",
+                  }}
+                >
+                  <option value="">{t("candidates.select_exam")}</option>
+                  {examTemplates.map((exam) => (
+                    <option key={exam.id} value={exam.id}>
+                      {exam.name} ({exam.position_name})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  {t("candidates.assign_position")}:
+                </label>
+                <select
+                  value={assignmentData.position_id}
+                  onChange={(e) =>
+                    setAssignmentData({
+                      ...assignmentData,
+                      position_id: e.target.value,
+                    })
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ddd",
+                  }}
+                >
+                  <option value="">{t("candidates.select_position")}</option>
+                  {positions.map((position) => (
+                    <option key={position.id} value={position.id}>
+                      {position.name}
+                      {position.department && ` (${position.department.name})`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "15px",
+                marginBottom: "15px",
+              }}
+            >
+              <div>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  {t("candidates.assign_programming_language")}:
+                </label>
+                <select
+                  value={assignmentData.programming_language_id}
+                  onChange={(e) =>
+                    setAssignmentData({
+                      ...assignmentData,
+                      programming_language_id: e.target.value,
+                    })
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ddd",
+                  }}
+                >
+                  <option value="">
+                    {t("candidates.select_programming_language")}
+                  </option>
+                  {programmingLanguages.map((lang) => (
+                    <option key={lang.id} value={lang.id}>
+                      {lang.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  {t("candidates.scheduled_date")} ({t("candidates.optional")}):
+                </label>
+                <input
+                  type="datetime-local"
+                  value={assignmentData.start_time}
+                  onChange={(e) =>
+                    setAssignmentData({
+                      ...assignmentData,
+                      start_time: e.target.value,
+                    })
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ddd",
+                  }}
+                />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button
+                type="submit"
                 style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
+                  padding: "10px 20px",
+                  backgroundColor: "#2196f3",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
                 }}
               >
-                ID
-              </th>
-              <th
+                {t("candidates.confirm_assignment")}
+              </button>
+              <button
+                type="button"
+                onClick={closeAssignmentForm}
                 style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
+                  padding: "10px 20px",
+                  backgroundColor: "#666",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
                 }}
               >
-                ชื่อ-นามสกุล
-              </th>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                อีเมล
-              </th>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                เบอร์โทร
-              </th>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                ตำแหน่ง
-              </th>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                สถานะ
-              </th>
-              <th
-                style={{
-                  padding: "15px",
-                  textAlign: "left",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                วันที่สมัคร
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {candidates.map((candidate) => (
-              <tr key={candidate.id}>
-                <td style={{ padding: "15px", borderBottom: "1px solid #eee" }}>
-                  {candidate.id}
-                </td>
-                <td style={{ padding: "15px", borderBottom: "1px solid #eee" }}>
-                  <span
-                    style={{
-                      color:
-                        candidate.status === "ผ่านการสอบ"
-                          ? "#1976d2"
-                          : "inherit",
-                      cursor:
-                        candidate.status === "ผ่านการสอบ"
-                          ? "pointer"
-                          : "default",
-                      textDecoration:
-                        candidate.status === "ผ่านการสอบ"
-                          ? "underline"
-                          : "none",
-                    }}
-                    onClick={() =>
-                      candidate.status === "ผ่านการสอบ" &&
-                      navigate(`/admin/candidates/${candidate.id}`)
-                    }
-                  >
-                    {candidate.first_name} {candidate.last_name}
-                  </span>
-                </td>
-                <td style={{ padding: "15px", borderBottom: "1px solid #eee" }}>
-                  {candidate.email}
-                </td>
-                <td style={{ padding: "15px", borderBottom: "1px solid #eee" }}>
-                  {candidate.phone}
-                </td>
-                <td style={{ padding: "15px", borderBottom: "1px solid #eee" }}>
-                  {candidate.position}
-                </td>
-                <td style={{ padding: "15px", borderBottom: "1px solid #eee" }}>
-                  <span
-                    style={{
-                      padding: "4px 8px",
-                      borderRadius: "4px",
-                      backgroundColor: getStatusColor(candidate.status),
-                      color: "white",
-                      fontSize: "12px",
-                    }}
-                  >
-                    {candidate.status}
-                  </span>
-                </td>
-                <td style={{ padding: "15px", borderBottom: "1px solid #eee" }}>
-                  {candidate.created_at}
-                </td>
+                {t("candidates.cancel")}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Loading state */}
+      {loading && (
+        <div style={{ textAlign: "center", padding: "20px" }}>
+          <p>{t("candidates.loading")}</p>
+        </div>
+      )}
+
+      {/* Error state */}
+      {error && (
+        <div
+          style={{
+            backgroundColor: "#ffebee",
+            border: "1px solid #f44336",
+            borderRadius: "4px",
+            padding: "15px",
+            marginBottom: "20px",
+            color: "#c62828",
+          }}
+        >
+          <p>{error}</p>
+        </div>
+      )}
+
+      {/* No candidates state */}
+      {!loading && !error && candidates.length === 0 && (
+        <div style={{ textAlign: "center", padding: "40px" }}>
+          <p>{t("candidates.no_candidates")}</p>
+        </div>
+      )}
+
+      {/* Candidates table */}
+      {!loading && !error && candidates.length > 0 && (
+        <div
+          style={{
+            backgroundColor: "white",
+            borderRadius: "8px",
+            overflow: "hidden",
+            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+          }}
+        >
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead style={{ backgroundColor: "#f5f5f5" }}>
+              <tr>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  {t("candidates.table.id")}
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  {t("candidates.table.name")}
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  {t("candidates.table.email")}
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  {t("candidates.table.phone")}
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  {t("candidates.table.position")}
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  {t("candidates.table.status")}
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "left",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  {t("candidates.table.created_at")}
+                </th>
+                <th
+                  style={{
+                    padding: "15px",
+                    textAlign: "center",
+                    borderBottom: "1px solid #ddd",
+                  }}
+                >
+                  {t("candidates.table.actions")}
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {candidates.map((candidate) => (
+                <tr key={candidate.id}>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {candidate.id}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    <span
+                      style={{
+                        color: "#1976d2",
+                        cursor: "pointer",
+                        textDecoration: "underline",
+                      }}
+                      onClick={() =>
+                        navigate(`/admin/candidates/${candidate.id}`)
+                      }
+                      title="ดูรายละเอียดและผลการสอบ"
+                    >
+                      {candidate.first_name} {candidate.last_name}
+                    </span>
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {candidate.email}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {candidate.phone}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {candidate.position}
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    <span
+                      style={{
+                        padding: "4px 8px",
+                        borderRadius: "4px",
+                        backgroundColor: getStatusColor(candidate.status),
+                        color: "white",
+                        fontSize: "12px",
+                      }}
+                    >
+                      {candidate.status}
+                    </span>
+                  </td>
+                  <td
+                    style={{ padding: "15px", borderBottom: "1px solid #eee" }}
+                  >
+                    {candidate.created_at}
+                  </td>
+                  <td
+                    style={{
+                      padding: "15px",
+                      borderBottom: "1px solid #eee",
+                      textAlign: "center",
+                    }}
+                  >
+                    <button
+                      onClick={() => openAssignmentForm(candidate)}
+                      style={{
+                        padding: "5px 10px",
+                        backgroundColor: "#2196f3",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                        marginRight: "5px",
+                      }}
+                      title={t("candidates.assign_tooltip")}
+                    >
+                      🎯 {t("candidates.assign")}
+                    </button>
+                    <button
+                      onClick={() =>
+                        navigate(`/admin/candidates/${candidate.id}`)
+                      }
+                      style={{
+                        padding: "5px 10px",
+                        backgroundColor: "#4caf50",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                      }}
+                      title="ดูผลการสอบและรายละเอียด"
+                    >
+                      📊 ดูผลสอบ
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -2755,24 +4606,74 @@ function CandidateDetailPage() {
   );
 }
 
-// Simple Exam Page
+// User Exam Page - Load available exams from database
 function ExamPage() {
   const navigate = useNavigate();
-  const [examSessions] = useState([
-    { id: "demo-session-1", name: "ข้อสอบ JavaScript Developer", duration: 60 },
-    { id: "demo-session-2", name: "ข้อสอบ Python Developer", duration: 90 },
-    { id: "demo-session-3", name: "ข้อสอบ React Developer", duration: 75 },
-    {
-      id: "real-session-1",
-      name: "🎯 ระบบตรวจจับการโกง (OpenCV)",
-      duration: 30,
-    },
-    {
-      id: "real-session-2",
-      name: "🤖 ระบบตรวจจับการโกง (YOLO11 Pose)",
-      duration: 30,
-    },
-  ]);
+  const [availableExams, setAvailableExams] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [creatingSession, setCreatingSession] = useState(null);
+
+  // Load available exams from database
+  useEffect(() => {
+    const loadAvailableExams = async () => {
+      try {
+        setLoading(true);
+        console.log("🔍 Loading available exams from database...");
+        const response = await apiService.getExamTemplates();
+        console.log("✅ Available exams loaded:", response);
+
+        // Filter only active exams
+        const activeExams =
+          response?.filter((exam) => exam.is_active !== false) || [];
+        setAvailableExams(activeExams);
+
+        console.log(
+          `📋 Found ${activeExams.length} active exams available for users`
+        );
+      } catch (error) {
+        console.error("❌ Failed to load available exams:", error);
+        // Fallback to empty array - show message to user
+        setAvailableExams([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadAvailableExams();
+  }, []);
+
+  // Create exam session and start exam
+  const handleStartExam = async (exam) => {
+    try {
+      console.log(
+        "🚀 Creating exam session for authenticated candidate:",
+        exam
+      );
+
+      // Create a new exam session for this authenticated candidate
+      const sessionData = {
+        candidate_id: candidate.id,
+      };
+
+      const response = await api.request(
+        `/api/v1/exam/exam-templates/${exam.template_id}/sessions`,
+        {
+          method: "POST",
+          body: JSON.stringify(sessionData),
+        }
+      );
+
+      console.log("✅ Exam session created:", response);
+
+      // Navigate to the exam interface with the new session ID
+      navigate(`/exam/${response.session.session_id}`);
+    } catch (error) {
+      console.error("❌ Failed to create exam session:", error);
+      alert(
+        `ไม่สามารถเริ่มการสอบได้: ${error.message || "กรุณาลองใหม่อีกครั้ง"}`
+      );
+    }
+  };
 
   return (
     <div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
@@ -2788,58 +4689,135 @@ function ExamPage() {
         }}
       >
         <h3>📋 ข้อสอบที่พร้อมทำ</h3>
-        {examSessions.map((session) => (
-          <div
-            key={session.id}
-            style={{
-              backgroundColor: "white",
-              padding: "15px",
-              marginBottom: "10px",
-              borderRadius: "8px",
-              border: "1px solid #ddd",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              <h4 style={{ margin: "0 0 5px 0" }}>{session.name}</h4>
-              <p style={{ margin: 0, color: "#666" }}>
-                เวลาในการทำ: {session.duration} นาที
-              </p>
-            </div>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button
-                style={{
-                  padding: "10px 20px",
-                  backgroundColor: "#4caf50",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  fontSize: "14px",
-                }}
-                onClick={() => navigate(`/exam/${session.id}`)}
-              >
-                🚀 เริ่มทำการสอบ
-              </button>
-              <button
-                style={{
-                  padding: "10px 20px",
-                  backgroundColor: "#ff9800",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  fontSize: "14px",
-                }}
-                onClick={() => navigate(`/debug/${session.id}`)}
-              >
-                🔬 Debug Mode
-              </button>
-            </div>
+
+        {loading ? (
+          <div style={{ textAlign: "center", padding: "20px" }}>
+            <p>🔄 กำลังโหลดข้อสอบจากฐานข้อมูล...</p>
           </div>
-        ))}
+        ) : availableExams.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "20px" }}>
+            <p>❌ ไม่พบข้อสอบที่พร้อมใช้งาน</p>
+            <p style={{ color: "#666", fontSize: "14px" }}>
+              กรุณาติดต่อผู้ดูแลระบบเพื่อสร้างข้อสอบ
+            </p>
+          </div>
+        ) : (
+          availableExams.map((exam) => (
+            <div
+              key={exam.id}
+              style={{
+                backgroundColor: "white",
+                padding: "20px",
+                marginBottom: "15px",
+                borderRadius: "8px",
+                border: "1px solid #ddd",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <h4 style={{ margin: "0 0 8px 0", color: "#1976d2" }}>
+                    📝 {exam.name}
+                  </h4>
+                  {exam.description && (
+                    <p
+                      style={{
+                        margin: "0 0 8px 0",
+                        color: "#666",
+                        fontSize: "14px",
+                      }}
+                    >
+                      {exam.description}
+                    </p>
+                  )}
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "15px",
+                      marginBottom: "10px",
+                    }}
+                  >
+                    <span style={{ fontSize: "14px", color: "#666" }}>
+                      ⏱️ เวลา: <strong>{exam.duration_minutes}</strong> นาที
+                    </span>
+                    <span style={{ fontSize: "14px", color: "#666" }}>
+                      📊 จำนวนข้อ: <strong>{exam.questions_count}</strong> ข้อ
+                    </span>
+                    {exam.programming_language && (
+                      <span
+                        style={{
+                          backgroundColor: "#e3f2fd",
+                          color: "#1976d2",
+                          padding: "2px 8px",
+                          borderRadius: "12px",
+                          fontSize: "12px",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        💻 {exam.programming_language}
+                      </span>
+                    )}
+                  </div>
+
+                  {exam.position && (
+                    <div style={{ fontSize: "13px", color: "#999" }}>
+                      🏢 {exam.position.company_name} -{" "}
+                      {exam.position.department_name} - {exam.position.name}
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
+                    marginLeft: "20px",
+                  }}
+                >
+                  <button
+                    style={{
+                      padding: "12px 24px",
+                      backgroundColor:
+                        creatingSession === exam.id ? "#ccc" : "#4caf50",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor:
+                        creatingSession === exam.id ? "not-allowed" : "pointer",
+                      fontSize: "14px",
+                      fontWeight: "bold",
+                      minWidth: "160px",
+                    }}
+                    onClick={() => handleStartExam(exam)}
+                    disabled={creatingSession === exam.id}
+                  >
+                    {creatingSession === exam.id
+                      ? "🔄 กำลังเตรียม..."
+                      : "🚀 เริ่มทำการสอบ"}
+                  </button>
+
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      color: "#666",
+                      textAlign: "center",
+                    }}
+                  >
+                    🤖 AI ตรวจจับการโกง
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       <div
@@ -2954,6 +4932,78 @@ function ExamCompletedPage() {
   );
 }
 
+// Candidate Portal Component
+function CandidatePortal() {
+  const navigate = useNavigate();
+  const [candidate, setCandidate] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Check for existing session on component mount
+  useEffect(() => {
+    const savedSession = localStorage.getItem("candidateSession");
+    if (savedSession) {
+      try {
+        const candidateData = JSON.parse(savedSession);
+        setCandidate(candidateData);
+      } catch (err) {
+        console.error("Error parsing saved session:", err);
+        localStorage.removeItem("candidateSession");
+      }
+    }
+    setLoading(false);
+  }, []);
+
+  const handleLoginSuccess = (candidateData) => {
+    setCandidate(candidateData);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("candidateSession");
+    setCandidate(null);
+  };
+
+  const handleBackToHome = () => {
+    navigate("/");
+  };
+
+  const handleStartExam = (exam) => {
+    // Navigate to exam interface with exam data
+    // This can be enhanced to start the actual exam session
+    console.log("Starting exam:", exam);
+    // For now, just alert - you can implement actual exam starting logic
+    alert(`กำลังเริ่มข้อสอบ: ${exam.name}`);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">กำลังโหลด...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show dashboard if candidate is logged in, otherwise show login
+  if (candidate) {
+    return (
+      <CandidateDashboard
+        candidate={candidate}
+        onLogout={handleLogout}
+        onStartExam={handleStartExam}
+      />
+    );
+  }
+
+  return (
+    <CandidateLogin
+      onLoginSuccess={handleLoginSuccess}
+      onBackToHome={handleBackToHome}
+    />
+  );
+}
+
 // Main App Component
 function App() {
   return (
@@ -2968,9 +5018,15 @@ function App() {
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/admin/companies" element={<CompaniesPage />} />
         <Route path="/admin/departments" element={<DepartmentsPage />} />
+        <Route path="/admin/positions" element={<PositionsPage />} />
+        <Route
+          path="/admin/programming-languages"
+          element={<ProgrammingLanguagesPage />}
+        />
         <Route path="/admin/exams" element={<ExamsPage />} />
         <Route path="/admin/candidates" element={<CandidatesPage />} />
         <Route path="/admin/candidates/:id" element={<CandidateDetailPage />} />
+        <Route path="/candidate-login" element={<CandidatePortal />} />
         <Route path="/exam" element={<ExamPage />} />
         <Route path="/exam/:sessionId" element={<ExamInterface />} />
         <Route path="/debug/:sessionId" element={<DebugMonitoring />} />

@@ -32,7 +32,6 @@ import { useTranslation } from "react-i18next";
 import { useEffect as useEffectCanvas, useRef as useRefCanvas } from "react";
 import { io } from "socket.io-client";
 import api from "../services/api";
-import { getMockExamData } from "../services/mockExamData";
 
 const ExamInterface = () => {
   const { sessionId } = useParams();
@@ -110,29 +109,15 @@ const ExamInterface = () => {
     onExpire: () => handleSubmitExam(true), // Auto-submit when time expires
   });
 
-  // Initialize WebSocket connection
+  // Initialize face detection status for all sessions
   useEffect(() => {
-    if (sessionId?.startsWith("demo-")) {
-      // Mock face detection for demo sessions
-      console.log("🎭 Demo mode: Using mock face detection");
-      const mockFaceDetection = setInterval(() => {
-        setFaceDetectionStatus({
-          detected: true,
-          verified: true,
-          confidence: 0.85 + Math.random() * 0.1,
-          suspicious: [],
-        });
-      }, 3000);
-
-      return () => clearInterval(mockFaceDetection);
-    } else if (sessionId && !sessionId.startsWith("demo-")) {
-      // For real sessions, disable WebSocket to avoid 404 errors
-      // Face detection will work through HTTP API calls in the face detection loop
+    if (sessionId) {
+      // Initialize face detection status for all sessions (real database sessions only)
       console.log(
-        "🔍 Real mode: WebSocket disabled, using HTTP API for face detection"
+        "🔍 Initializing face detection status for session:",
+        sessionId
       );
 
-      // Initialize face detection status for real sessions
       setFaceDetectionStatus({
         detected: false,
         verified: false,
@@ -142,37 +127,22 @@ const ExamInterface = () => {
     }
   }, [sessionId]);
 
-  // Load exam data
+  // Load exam data from database API
   useEffect(() => {
     const loadExamData = async () => {
       try {
-        let response;
-
-        if (sessionId?.startsWith("demo-")) {
-          // For demo sessions, use mock data directly
-          console.log("🎭 Demo session: Using mock data");
-          response = await getMockExamData(sessionId);
-        } else {
-          // For real sessions, try API first, then fallback to mock
-          try {
-            console.log("🔍 Real session: Trying API first");
-            const apiResponse = await api.request(
-              `/api/v1/exam/sessions/${sessionId}/status`
-            );
-            console.log("✅ Real session: API data loaded");
-            response = { data: apiResponse }; // Wrap API response to match mock format
-          } catch (apiError) {
-            console.log(
-              "⚠️ Real session: API not available, using mock data template"
-            );
-            response = await getMockExamData(sessionId);
-          }
-        }
-
-        setExamData(response.data);
+        console.log(
+          "🔍 Loading exam data from database API for session:",
+          sessionId
+        );
+        const apiResponse = await api.request(
+          `/api/v1/exam/sessions/${sessionId}/status`
+        );
+        console.log("✅ Database exam data loaded successfully");
+        setExamData(apiResponse);
       } catch (error) {
-        console.error("Error loading exam data:", error);
-        // For demo purposes, redirect to exam selection instead of error page
+        console.error("❌ Error loading exam data from database:", error);
+        // Redirect to exam selection if session not found
         navigate("/exam");
       }
     };
@@ -231,18 +201,18 @@ const ExamInterface = () => {
             tabSwitches: prev.tabSwitches + 1,
           }));
 
-          // Log to backend
-          if (!sessionId?.startsWith("demo-")) {
-            api.request(`/api/v1/exam/sessions/${sessionId}/log-activity`, {
+          // Log to backend database
+          api
+            .request(`/api/v1/exam/sessions/${sessionId}/log-activity`, {
               method: "POST",
               body: JSON.stringify({
                 type: "tab_switch",
                 timestamp,
               }),
+            })
+            .catch((error) => {
+              console.error("Failed to log tab switch activity:", error);
             });
-          } else {
-            console.log("📋 Mock activity logged: tab_switch");
-          }
         }
       }
     };
@@ -275,18 +245,18 @@ const ExamInterface = () => {
           }));
           setShowFullscreenWarning(true);
 
-          // Log to backend
-          if (!sessionId?.startsWith("demo-")) {
-            api.request(`/api/v1/exam/sessions/${sessionId}/log-activity`, {
+          // Log to backend database
+          api
+            .request(`/api/v1/exam/sessions/${sessionId}/log-activity`, {
               method: "POST",
               body: JSON.stringify({
                 type: "fullscreen_exit",
                 timestamp,
               }),
+            })
+            .catch((error) => {
+              console.error("Failed to log fullscreen exit activity:", error);
             });
-          } else {
-            console.log("📋 Mock activity logged: fullscreen_exit");
-          }
         }
       }
     };
@@ -377,9 +347,8 @@ const ExamInterface = () => {
       ctx.setLineDash([]);
     }
 
-    // Draw YOLO11 pose keypoints (only for real-session-2)
+    // Draw YOLO11 pose keypoints (all sessions now use YOLO11)
     if (
-      sessionId === "real-session-2" &&
       faceDetectionStatus.pose_keypoints &&
       faceDetectionStatus.pose_keypoints.length > 0
     ) {
@@ -653,89 +622,75 @@ const ExamInterface = () => {
     ctx.fillStyle = faceDetectionStatus.detected ? "#00ff00" : "#ff0000";
     ctx.font = "14px Arial";
 
-    if (sessionId === "real-session-2") {
-      // YOLO11 specific status
+    // YOLO11 specific status (now default for all sessions)
+    ctx.fillText(
+      `🤖 YOLO11: ${
+        faceDetectionStatus.face_rectangles.length
+      } person(s) | Confidence: ${Math.round(
+        (faceDetectionStatus.confidence || 0) * 100
+      )}%`,
+      10,
+      25
+    );
+
+    // Add pose analysis summary
+    if (faceDetectionStatus.pose_analysis) {
+      ctx.fillStyle = "#00ffff";
+      ctx.font = "12px Arial";
       ctx.fillText(
-        `🤖 YOLO11: ${
-          faceDetectionStatus.face_rectangles.length
-        } person(s) | Confidence: ${Math.round(
-          (faceDetectionStatus.confidence || 0) * 100
-        )}%`,
+        `Head: ${
+          faceDetectionStatus.pose_analysis.head_position || "unknown"
+        } | ` +
+          `Posture: ${
+            faceDetectionStatus.pose_analysis.body_posture || "unknown"
+          }`,
         10,
-        25
+        45
       );
-
-      // Add pose analysis summary
-      if (faceDetectionStatus.pose_analysis) {
-        ctx.fillStyle = "#00ffff";
-        ctx.font = "12px Arial";
-        ctx.fillText(
-          `Head: ${
-            faceDetectionStatus.pose_analysis.head_position || "unknown"
-          } | ` +
-            `Posture: ${
-              faceDetectionStatus.pose_analysis.body_posture || "unknown"
-            }`,
-          10,
-          45
-        );
-        ctx.fillText(
-          `Hands: ${
-            faceDetectionStatus.pose_analysis.hand_positions || "unknown"
-          } | ` +
-            `Attention: ${
-              faceDetectionStatus.pose_analysis.attention_direction || "unknown"
-            }`,
-          10,
-          60
-        );
-      }
-
-      // Add keypoint count
-      if (
-        faceDetectionStatus.pose_keypoints &&
-        faceDetectionStatus.pose_keypoints.length > 0
-      ) {
-        ctx.fillStyle = "#ffff00";
-        ctx.font = "11px Arial";
-        const totalKeypoints =
-          faceDetectionStatus.pose_keypoints[0]?.length || 0;
-        const highConfidenceKp =
-          faceDetectionStatus.pose_keypoints[0]?.filter(
-            (kp) => kp.confidence > 0.7
-          ).length || 0;
-        ctx.fillText(
-          `🔗 Keypoints: ${highConfidenceKp}/${totalKeypoints} (high confidence)`,
-          10,
-          75
-        );
-      }
-
-      // Add phone detection status
-      if (faceDetectionStatus.phone_detection) {
-        ctx.fillStyle = faceDetectionStatus.phone_detection.phones_detected
-          ? "#ff0000"
-          : "#00ff00";
-        ctx.font = "12px Arial";
-        ctx.fillText(
-          `📱 Phones: ${faceDetectionStatus.phone_detection.phone_count} detected | ` +
-            `Confidence: ${Math.round(
-              (faceDetectionStatus.phone_detection.phone_confidence || 0) * 100
-            )}%`,
-          10,
-          90
-        );
-      }
-    } else {
-      // OpenCV specific status
       ctx.fillText(
-        `👁️ OpenCV: ${
-          faceDetectionStatus.face_rectangles.length
-        } face(s) | Confidence: ${Math.round(
-          (faceDetectionStatus.confidence || 0) * 100
-        )}%`,
+        `Hands: ${
+          faceDetectionStatus.pose_analysis.hand_positions || "unknown"
+        } | ` +
+          `Attention: ${
+            faceDetectionStatus.pose_analysis.attention_direction || "unknown"
+          }`,
         10,
-        25
+        60
+      );
+    }
+
+    // Add keypoint count
+    if (
+      faceDetectionStatus.pose_keypoints &&
+      faceDetectionStatus.pose_keypoints.length > 0
+    ) {
+      ctx.fillStyle = "#ffff00";
+      ctx.font = "11px Arial";
+      const totalKeypoints = faceDetectionStatus.pose_keypoints[0]?.length || 0;
+      const highConfidenceKp =
+        faceDetectionStatus.pose_keypoints[0]?.filter(
+          (kp) => kp.confidence > 0.7
+        ).length || 0;
+      ctx.fillText(
+        `🔗 Keypoints: ${highConfidenceKp}/${totalKeypoints} (high confidence)`,
+        10,
+        75
+      );
+    }
+
+    // Add phone detection status
+    if (faceDetectionStatus.phone_detection) {
+      ctx.fillStyle = faceDetectionStatus.phone_detection.phones_detected
+        ? "#ff0000"
+        : "#00ff00";
+      ctx.font = "12px Arial";
+      ctx.fillText(
+        `📱 Phones: ${faceDetectionStatus.phone_detection.phone_count} detected | ` +
+          `Confidence: ${Math.round(
+            (faceDetectionStatus.phone_detection.phone_confidence || 0) * 100
+          )}%`,
+        10,
+        90
       );
     }
 
@@ -746,7 +701,7 @@ const ExamInterface = () => {
     ) {
       ctx.fillStyle = "#ff8800";
       ctx.font = "12px Arial";
-      const startY = sessionId === "real-session-2" ? 95 : 45;
+      const startY = 95; // YOLO11 is now default, always use extended layout
       faceDetectionStatus.suspicious.forEach((activity, index) => {
         ctx.fillText(
           `⚠️ ${activity.replace("_", " ").toUpperCase()}`,
@@ -758,7 +713,6 @@ const ExamInterface = () => {
 
     // Add legend for YOLO11 keypoint colors (bottom right)
     if (
-      sessionId === "real-session-2" &&
       faceDetectionStatus.pose_keypoints &&
       faceDetectionStatus.pose_keypoints.length > 0
     ) {
@@ -792,34 +746,12 @@ const ExamInterface = () => {
   useEffect(() => {
     if (!webcamReady || !webcamRef.current) return;
 
-    if (sessionId?.startsWith("demo-")) {
-      // Mock face detection for demo sessions
-      console.log("🎭 Demo mode: Starting mock face detection");
-      const faceDetectionInterval = setInterval(() => {
-        // Simulate face detection with random confidence
-        const confidence = 0.8 + Math.random() * 0.15;
-        const detected = confidence > 0.7;
-
-        setFaceDetectionStatus((prev) => ({
-          detected,
-          verified: detected,
-          confidence,
-          suspicious: detected ? [] : ["low_confidence"],
-        }));
-
-        console.log(
-          `👤 Mock face detection: ${
-            detected ? "Detected" : "Not detected"
-          } (${Math.round(confidence * 100)}%)`
-        );
-      }, 1000); // Fast detection for demo - 1 second
-
-      return () => {
-        clearInterval(faceDetectionInterval);
-      };
-    } else {
-      // Real face detection for actual sessions
-      console.log("🔍 Starting real face detection service");
+    // Real YOLO11 face detection for all sessions (including demo sessions)
+    if (true) {
+      // Real YOLO11 face detection for all sessions (including demo sessions)
+      console.log(
+        `🤖 Starting YOLO11 face detection service for session: ${sessionId}`
+      );
       const faceDetectionInterval = setInterval(async () => {
         const imageSrc = webcamRef.current.getScreenshot();
         if (imageSrc) {
@@ -868,8 +800,9 @@ const ExamInterface = () => {
             });
 
             // Enhanced logging based on detection service
-            if (sessionId === "real-session-2") {
-              // YOLO11 specific logging
+            // YOLO11 specific logging for all sessions
+            if (true) {
+              // All sessions now use YOLO11 pose + segmentation detection
               console.log(
                 `🤖 [YOLO11] Pose detection: ${
                   result.face_detected ? "Person Detected" : "No Person"
@@ -947,108 +880,71 @@ const ExamInterface = () => {
               result.suspicious_activity.length > 0
             ) {
               result.suspicious_activity.forEach((activity) => {
-                if (sessionId === "real-session-2") {
-                  // YOLO11 specific suspicious activity logging
-                  switch (activity) {
-                    case "head_down_detected":
-                      console.warn(
-                        "🔽 [YOLO11] หัวก้มลง - Head looking down detected"
-                      );
-                      break;
-                    case "looking_away_detected":
-                      console.warn(
-                        "👀 [YOLO11] มองไปที่อื่น - Looking away detected"
-                      );
-                      break;
-                    case "hand_near_face_detected":
-                      console.warn(
-                        "✋ [YOLO11] มือใกล้หน้า - Hand near face detected"
-                      );
-                      break;
-                    case "suspicious_posture_detected":
-                      console.warn(
-                        "🏃 [YOLO11] ท่าทางน่าสงสัย - Suspicious posture detected"
-                      );
-                      break;
-                    case "attention_diverted":
-                      console.warn(
-                        "🎯 [YOLO11] สมาธิเสียโฟกัส - Attention diverted"
-                      );
-                      break;
-                    case "prolonged_absence_detected":
-                      console.warn(
-                        "👻 [YOLO11] หายไปนานเกินไป - Prolonged absence detected"
-                      );
-                      break;
-                    case "mobile_phone_detected":
-                      console.warn(
-                        "📱 [YOLO11] โทรศัพท์มือถือตรวจพบ - Mobile phone detected"
-                      );
-                      break;
-                    case "phone_usage_suspected":
-                      console.warn(
-                        "📞 [YOLO11] สงสัยใช้โทรศัพท์ - Phone usage suspected"
-                      );
-                      break;
-                    case "confirmed_phone_usage":
-                      console.warn(
-                        "🚨 [YOLO11] ยืนยันการใช้โทรศัพท์ - Confirmed phone usage"
-                      );
-                      break;
-                    default:
-                      console.warn(
-                        `⚠️ [YOLO11] กิจกรรมน่าสงสัย - Suspicious activity: ${activity}`
-                      );
-                  }
-                } else {
-                  // OpenCV specific suspicious activity logging
-                  switch (activity) {
-                    case "head_turned_away":
-                      console.warn(
-                        "🔄 [OPENCV] หันหน้าไปทางอื่น - Head turned away"
-                      );
-                      break;
-                    case "digital_device_detected":
-                      console.warn(
-                        "📱 [OPENCV] อุปกรณ์ดิจิทัลตรวจพบ - Digital device detected"
-                      );
-                      break;
-                    case "prolonged_absence_detected":
-                      console.warn(
-                        "👻 [OPENCV] หายไปนานเกินไป - Prolonged absence detected"
-                      );
-                      break;
-                    default:
-                      console.warn(
-                        `⚠️ [OPENCV] กิจกรรมน่าสงสัย - Suspicious activity: ${activity}`
-                      );
-                  }
+                // YOLO11 specific suspicious activity logging (now default for all sessions)
+                switch (activity) {
+                  case "head_down_detected":
+                    console.warn(
+                      "🔽 [YOLO11] หัวก้มลง - Head looking down detected"
+                    );
+                    break;
+                  case "looking_away_detected":
+                    console.warn(
+                      "👀 [YOLO11] มองไปที่อื่น - Looking away detected"
+                    );
+                    break;
+                  case "hand_near_face_detected":
+                    console.warn(
+                      "✋ [YOLO11] มือใกล้หน้า - Hand near face detected"
+                    );
+                    break;
+                  case "suspicious_posture_detected":
+                    console.warn(
+                      "🏃 [YOLO11] ท่าทางน่าสงสัย - Suspicious posture detected"
+                    );
+                    break;
+                  case "attention_diverted":
+                    console.warn(
+                      "🎯 [YOLO11] สมาธิเสียโฟกัส - Attention diverted"
+                    );
+                    break;
+                  case "prolonged_absence_detected":
+                    console.warn(
+                      "👻 [YOLO11] หายไปนานเกินไป - Prolonged absence detected"
+                    );
+                    break;
+                  case "mobile_phone_detected":
+                    console.warn(
+                      "📱 [YOLO11] โทรศัพท์มือถือตรวจพบ - Mobile phone detected"
+                    );
+                    break;
+                  case "phone_usage_suspected":
+                    console.warn(
+                      "📞 [YOLO11] สงสัยใช้โทรศัพท์ - Phone usage suspected"
+                    );
+                    break;
+                  case "confirmed_phone_usage":
+                    console.warn(
+                      "🚨 [YOLO11] ยืนยันการใช้โทรศัพท์ - Confirmed phone usage"
+                    );
+                    break;
+                  default:
+                    console.warn(
+                      `⚠️ [YOLO11] กิจกรรมน่าสงสัย - Suspicious activity: ${activity}`
+                    );
                 }
               });
 
-              // Enhanced detection summary logging
-              if (sessionId === "real-session-2") {
-                console.log("📊 [YOLO11] Pose Detection Summary:", {
-                  activities: result.suspicious_activity,
-                  num_persons: result.face_count,
-                  pose_analysis: result.pose_analysis,
-                  keypoints_detected: result.pose_keypoints?.length || 0,
-                  analysis_type: "yolo11_pose",
-                  timestamp: new Date().toISOString(),
-                  session_id: sessionId,
-                  confidence: result.confidence,
-                });
-              } else {
-                console.log("📊 [OPENCV] Detection Summary:", {
-                  activities: result.suspicious_activity,
-                  num_faces: result.num_faces,
-                  face_direction: result.face_direction,
-                  analysis_type: result.analysis_type,
-                  timestamp: new Date().toISOString(),
-                  session_id: sessionId,
-                  confidence: result.confidence,
-                });
-              }
+              // Enhanced detection summary logging (YOLO11 now default)
+              console.log("📊 [YOLO11] Pose Detection Summary:", {
+                activities: result.suspicious_activity,
+                num_persons: result.face_count,
+                pose_analysis: result.pose_analysis,
+                keypoints_detected: result.pose_keypoints?.length || 0,
+                analysis_type: "yolo11_pose",
+                timestamp: new Date().toISOString(),
+                session_id: sessionId,
+                confidence: result.confidence,
+              });
             }
 
             // Note: WebSocket disabled for real sessions to avoid 404 errors
@@ -1100,23 +996,18 @@ const ExamInterface = () => {
         await screenfull.request();
       }
 
-      // Start exam
-      try {
-        const response = await api.request(
-          `/api/v1/exam/sessions/${sessionId}/start`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              candidate_id: examData.candidate_id,
-              timestamp: new Date().toISOString(),
-            }),
-          }
-        );
-        setExamData(response); // API returns data directly
-      } catch (apiError) {
-        // For mock data, just use the existing data
-        console.log("Using mock data for exam start");
-      }
+      // Start exam via database API
+      const response = await api.request(
+        `/api/v1/exam/sessions/${sessionId}/start`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            candidate_id: examData.candidate_id,
+            timestamp: new Date().toISOString(),
+          }),
+        }
+      );
+      setExamData(response); // API returns updated exam data
 
       setExamStarted(true);
 
@@ -1144,24 +1035,15 @@ const ExamInterface = () => {
     setIsSubmitting(true);
 
     try {
-      try {
-        await api.request(`/api/v1/exam/sessions/${sessionId}/submit`, {
-          method: "POST",
-          body: JSON.stringify({
-            answers,
-            isAutoSubmit,
-            submissionTime: new Date().toISOString(),
-          }),
-        });
-      } catch (apiError) {
-        // For mock data, just log the submission
-        console.log("Mock exam submitted:", {
-          sessionId,
+      // Submit exam to database API
+      await api.request(`/api/v1/exam/sessions/${sessionId}/submit`, {
+        method: "POST",
+        body: JSON.stringify({
           answers,
           isAutoSubmit,
           submissionTime: new Date().toISOString(),
-        });
-      }
+        }),
+      });
 
       // Exit fullscreen
       if (screenfull.isEnabled && screenfull.isFullscreen) {
@@ -1259,32 +1141,19 @@ const ExamInterface = () => {
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      {/* Mode Banner */}
-      {sessionId?.startsWith("demo-") ? (
-        <Box
-          sx={{
-            bgcolor: "info.main",
-            color: "white",
-            p: 1,
-            textAlign: "center",
-            fontSize: "14px",
-          }}
-        >
-          🎭 DEMO MODE - ระบบจำลอง | Mock face detection และ API responses
-        </Box>
-      ) : (
-        <Box
-          sx={{
-            bgcolor: "success.main",
-            color: "white",
-            p: 1,
-            textAlign: "center",
-            fontSize: "14px",
-          }}
-        >
-          🔍 REAL MODE - ระบบจริง | Real face detection กำลังทำงาน
-        </Box>
-      )}
+      {/* System Status Banner */}
+      <Box
+        sx={{
+          bgcolor: "success.main",
+          color: "white",
+          p: 1,
+          textAlign: "center",
+          fontSize: "14px",
+        }}
+      >
+        🤖 YOLO11 AI SYSTEM - ระบบตรวจจับการโกงด้วย AI | Real-time pose
+        detection กำลังทำงาน
+      </Box>
 
       {/* Header with timer and status */}
       <Paper
@@ -1591,8 +1460,8 @@ const ExamInterface = () => {
                 )}
               </Box>
 
-              {/* YOLO11 Pose Analysis Panel (only for real-session-2) */}
-              {sessionId === "real-session-2" && (
+              {/* YOLO11 Pose Analysis Panel (now available for all sessions) */}
+              {
                 <Box
                   sx={{
                     mb: 2,
@@ -1872,7 +1741,7 @@ const ExamInterface = () => {
                       </Box>
                     )}
                 </Box>
-              )}
+              }
 
               {/* Browser Activities */}
               <Box>

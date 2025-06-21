@@ -107,39 +107,14 @@ class ApiService {
 
   // Exam Templates
   async getExamTemplates() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/admin/exam-templates`);
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error("Error fetching exam templates:", error);
-      throw error;
-    }
+    return this.request("/admin/exam-templates");
   }
 
   async createExamTemplate(examData) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/admin/exam-templates`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(examData),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error("Error creating exam template:", error);
-      throw error;
-    }
+    return this.request("/admin/exam-templates", {
+      method: "POST",
+      body: JSON.stringify(examData),
+    });
   }
 
   async updateExamTemplate(id, data) {
@@ -157,27 +132,10 @@ class ApiService {
 
   // AI Exam Generation
   async generateAIExam(examConfig) {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/admin/exam-templates/generate-ai`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(examConfig),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error("Error generating AI exam:", error);
-      throw error;
-    }
+    return this.request("/admin/exam-templates/generate-ai", {
+      method: "POST",
+      body: JSON.stringify(examConfig),
+    });
   }
 
   async getConfigOptions() {

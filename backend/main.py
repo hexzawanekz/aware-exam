@@ -13,6 +13,7 @@ import asyncio
 # Import routers and modules
 from api.v1 import exam
 from api.v1 import admin
+from api.v1 import candidate
 from core.database import engine, SessionLocal, get_db
 from models.database import Base, ExamSession, Candidate
 from services.face_detection import FaceDetectionService
@@ -42,6 +43,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # Include API routers
 app.include_router(exam.router, prefix="/api/v1/exam")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(candidate.router, prefix="/api/v1")
 
 # Initialize services
 face_detection_service = FaceDetectionService()

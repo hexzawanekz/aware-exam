@@ -32,6 +32,21 @@ class Department(Base):
     company = relationship("Company", back_populates="departments")
     positions = relationship("Position", back_populates="department", cascade="all, delete-orphan")
 
+class ProgrammingLanguage(Base):
+    __tablename__ = "programming_languages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False, unique=True, index=True)
+    description = Column(Text, nullable=True)
+    version = Column(String(50), nullable=True)  # e.g., "3.9", "ES6", "11"
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    positions = relationship("Position", back_populates="programming_language")
+    exam_templates = relationship("ExamTemplate", back_populates="programming_language_obj")
+
 class Position(Base):
     __tablename__ = "positions"
     
@@ -39,11 +54,13 @@ class Position(Base):
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
+    programming_language_id = Column(Integer, ForeignKey("programming_languages.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     department = relationship("Department", back_populates="positions")
+    programming_language = relationship("ProgrammingLanguage", back_populates="positions")
     exam_templates = relationship("ExamTemplate", back_populates="position", cascade="all, delete-orphan")
 
 class ExamTemplate(Base):
@@ -53,15 +70,18 @@ class ExamTemplate(Base):
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
     position_id = Column(Integer, ForeignKey("positions.id"), nullable=False)
-    programming_language = Column(String(100), nullable=True)
+    programming_language = Column(String(100), nullable=True)  # Keep for backward compatibility
+    programming_language_id = Column(Integer, ForeignKey("programming_languages.id"), nullable=True)
     duration_minutes = Column(Integer, default=60)
     questions = Column(JSON, nullable=True)  # Store questions as JSON
     is_active = Column(Boolean, default=True)
+    exam_metadata = Column(JSON, nullable=True)  # Additional metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     position = relationship("Position", back_populates="exam_templates")
+    programming_language_obj = relationship("ProgrammingLanguage", back_populates="exam_templates")
     exam_sessions = relationship("ExamSession", back_populates="exam_template")
 
 class Candidate(Base):

@@ -104,7 +104,8 @@
         {
             "parameters": {
                 "url": "=http://host.docker.internal:8000/api/v1/exam/sessions/{{ $json.session_id }}/update-results",
-                "authentication": "none",\n        "requestMethod": "POST",
+                "authentication": "none",
+                "requestMethod": "POST",
                 "body": "={{ {\n  score: $json.exam_score,\n  status: $json.status,\n  cheating_probability: $json.cheating_percentage,\n  ai_confidence: $json.ai_confidence,\n  suspicious_events: $json.suspicious_events,\n  analysis_metadata: $json.analysis_metadata\n} }}",
                 "options": {
                     "bodyContentType": "json",

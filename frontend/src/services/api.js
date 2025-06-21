@@ -235,6 +235,59 @@ class ApiService {
   async getExamSessionDetails(sessionId) {
     return this.request(`/api/v1/admin/exam-sessions/${sessionId}`);
   }
+
+  // Configuration Options
+  async getConfigOptions() {
+    return this.request("/api/v1/admin/exam-generation/config-options");
+  }
+
+  // Candidate API methods
+  async candidateLogin(loginData) {
+    return this.request("/api/v1/candidate/login", {
+      method: "POST",
+      body: JSON.stringify(loginData),
+    });
+  }
+
+  async getCandidateExams(candidateId) {
+    return this.request(`/api/v1/candidate/exams/${candidateId}`);
+  }
+
+  async assignExamToCandidate(assignmentData) {
+    return this.request("/api/v1/candidate/assign-exam", {
+      method: "POST",
+      body: JSON.stringify(assignmentData),
+    });
+  }
+
+  async getAvailableExamTemplates() {
+    return this.request("/api/v1/candidate/available-exams");
+  }
+
+  // Programming Languages
+  async getProgrammingLanguages() {
+    return this.request("/api/v1/admin/programming-languages");
+  }
+
+  async createProgrammingLanguage(languageData) {
+    return this.request("/api/v1/admin/programming-languages", {
+      method: "POST",
+      body: JSON.stringify(languageData),
+    });
+  }
+
+  async updateProgrammingLanguage(languageId, languageData) {
+    return this.request(`/api/v1/admin/programming-languages/${languageId}`, {
+      method: "PUT",
+      body: JSON.stringify(languageData),
+    });
+  }
+
+  async deleteProgrammingLanguage(languageId) {
+    return this.request(`/api/v1/admin/programming-languages/${languageId}`, {
+      method: "DELETE",
+    });
+  }
 }
 
 export default new ApiService();

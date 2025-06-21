@@ -7,7 +7,7 @@ import json
 import httpx
 
 from core.database import get_db
-from models.database import Company, Department, Position, ExamTemplate, Candidate, ExamSession
+from models.database import Company, Department, Position, ProgrammingLanguage, ExamTemplate, Candidate, ExamSession
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -49,12 +49,31 @@ class PositionCreate(BaseModel):
     name: str
     description: Optional[str] = None
     department_id: int
+    programming_language_id: Optional[int] = None
 
 class PositionResponse(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
     department_id: int
+    programming_language_id: Optional[int] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class ProgrammingLanguageCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    version: Optional[str] = None
+    is_active: bool = True
+
+class ProgrammingLanguageResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    version: Optional[str] = None
+    is_active: bool
     created_at: datetime
     
     class Config:
@@ -96,6 +115,35 @@ class N8NWebhookResponse(BaseModel):
     error: Optional[str] = None
     processing_time: Optional[float] = None
     timestamp: str
+
+# Add Candidate Management after the AI Exam endpoints
+
+class CandidateCreate(BaseModel):
+    first_name: str
+    last_name: str
+    email: str
+    phone: Optional[str] = None
+
+class CandidateUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    position_id: Optional[int] = None
+    programming_language_id: Optional[int] = None
+
+class CandidateResponse(BaseModel):
+    id: int
+    first_name: str
+    last_name: str
+    email: str
+    phone: Optional[str] = None
+    created_at: datetime
+    status: Optional[str] = None
+    position: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
 
 # Dashboard Statistics
 @router.get("/dashboard/stats", response_model=DashboardStats)
@@ -211,21 +259,45 @@ async def create_department(
     db.refresh(db_department)
     return db_department
 
-@router.get("/companies/{company_id}/departments", response_model=List[DepartmentResponse])
+@router.get("/companies/{company_id}/departments")
 async def list_company_departments(company_id: int, db: Session = Depends(get_db)):
-    """List all departments for a company"""
+    """List all departments for a company with company information"""
     departments = db.query(Department).filter(Department.company_id == company_id).all()
-    return departments
+    
+    result = []
+    for dept in departments:
+        result.append({
+            "id": dept.id,
+            "name": dept.name,
+            "description": dept.description,
+            "company_id": dept.company_id,
+            "company_name": dept.company.name if dept.company else None,
+            "created_at": dept.created_at.isoformat() if dept.created_at else None
+        })
+    
+    return result
 
-@router.get("/departments", response_model=List[DepartmentResponse])
+@router.get("/departments")
 async def list_all_departments(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
-    """List all departments with pagination"""
+    """List all departments with pagination and company information"""
     departments = db.query(Department).offset(skip).limit(limit).all()
-    return departments
+    
+    result = []
+    for dept in departments:
+        result.append({
+            "id": dept.id,
+            "name": dept.name,
+            "description": dept.description,
+            "company_id": dept.company_id,
+            "company_name": dept.company.name if dept.company else None,
+            "created_at": dept.created_at.isoformat() if dept.created_at else None
+        })
+    
+    return result
 
 @router.put("/departments/{department_id}", response_model=DepartmentResponse)
 async def update_department(
@@ -269,10 +341,19 @@ async def create_position(
     if not department:
         raise HTTPException(status_code=404, detail="Department not found")
     
+    # Verify programming language exists if provided
+    if position.programming_language_id:
+        programming_language = db.query(ProgrammingLanguage).filter(
+            ProgrammingLanguage.id == position.programming_language_id
+        ).first()
+        if not programming_language:
+            raise HTTPException(status_code=404, detail="Programming language not found")
+    
     db_position = Position(
         name=position.name,
         description=position.description,
-        department_id=department_id
+        department_id=department_id,
+        programming_language_id=position.programming_language_id
     )
     db.add(db_position)
     db.commit()
@@ -303,6 +384,9 @@ async def list_all_positions(
             "department_id": position.department_id,
             "department_name": position.department.name if position.department else None,
             "company_name": position.department.company.name if position.department and position.department.company else None,
+            "programming_language_id": position.programming_language_id,
+            "programming_language_name": position.programming_language.name if position.programming_language else None,
+            "programming_language_version": position.programming_language.version if position.programming_language else None,
             "created_at": position.created_at.isoformat() if position.created_at else None
         })
     
@@ -319,8 +403,18 @@ async def update_position(
     if not position:
         raise HTTPException(status_code=404, detail="Position not found")
     
+    # Verify programming language exists if provided
+    if position_update.programming_language_id:
+        programming_language = db.query(ProgrammingLanguage).filter(
+            ProgrammingLanguage.id == position_update.programming_language_id
+        ).first()
+        if not programming_language:
+            raise HTTPException(status_code=404, detail="Programming language not found")
+    
     position.name = position_update.name
     position.description = position_update.description
+    position.department_id = position_update.department_id
+    position.programming_language_id = position_update.programming_language_id
     
     db.commit()
     db.refresh(position)
@@ -336,6 +430,103 @@ async def delete_position(position_id: int, db: Session = Depends(get_db)):
     db.delete(position)
     db.commit()
     return {"message": "Position deleted successfully"}
+
+# Programming Language Management
+@router.post("/programming-languages", response_model=ProgrammingLanguageResponse)
+async def create_programming_language(
+    programming_language: ProgrammingLanguageCreate, 
+    db: Session = Depends(get_db)
+):
+    """Create a new programming language"""
+    db_programming_language = ProgrammingLanguage(
+        name=programming_language.name,
+        description=programming_language.description,
+        version=programming_language.version,
+        is_active=programming_language.is_active
+    )
+    db.add(db_programming_language)
+    db.commit()
+    db.refresh(db_programming_language)
+    return db_programming_language
+
+@router.get("/programming-languages")
+async def list_programming_languages(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    active_only: bool = Query(False),
+    db: Session = Depends(get_db)
+):
+    """List all programming languages with pagination"""
+    query = db.query(ProgrammingLanguage)
+    
+    if active_only:
+        query = query.filter(ProgrammingLanguage.is_active == True)
+    
+    programming_languages = query.offset(skip).limit(limit).all()
+    
+    result = []
+    for lang in programming_languages:
+        # Count positions using this language
+        position_count = db.query(Position).filter(Position.programming_language_id == lang.id).count()
+        
+        result.append({
+            "id": lang.id,
+            "name": lang.name,
+            "description": lang.description,
+            "version": lang.version,
+            "is_active": lang.is_active,
+            "position_count": position_count,
+            "created_at": lang.created_at.isoformat() if lang.created_at else None
+        })
+    
+    return result
+
+@router.get("/programming-languages/{language_id}", response_model=ProgrammingLanguageResponse)
+async def get_programming_language(language_id: int, db: Session = Depends(get_db)):
+    """Get programming language by ID"""
+    language = db.query(ProgrammingLanguage).filter(ProgrammingLanguage.id == language_id).first()
+    if not language:
+        raise HTTPException(status_code=404, detail="Programming language not found")
+    return language
+
+@router.put("/programming-languages/{language_id}", response_model=ProgrammingLanguageResponse)
+async def update_programming_language(
+    language_id: int, 
+    language_update: ProgrammingLanguageCreate, 
+    db: Session = Depends(get_db)
+):
+    """Update programming language"""
+    language = db.query(ProgrammingLanguage).filter(ProgrammingLanguage.id == language_id).first()
+    if not language:
+        raise HTTPException(status_code=404, detail="Programming language not found")
+    
+    language.name = language_update.name
+    language.description = language_update.description
+    language.version = language_update.version
+    language.is_active = language_update.is_active
+    
+    db.commit()
+    db.refresh(language)
+    return language
+
+@router.delete("/programming-languages/{language_id}")
+async def delete_programming_language(language_id: int, db: Session = Depends(get_db)):
+    """Delete programming language"""
+    language = db.query(ProgrammingLanguage).filter(ProgrammingLanguage.id == language_id).first()
+    if not language:
+        raise HTTPException(status_code=404, detail="Programming language not found")
+    
+    # Check if language is being used by positions
+    position_count = db.query(Position).filter(Position.programming_language_id == language_id).count()
+    if position_count > 0:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot delete programming language. It is being used by {position_count} position(s)."
+        )
+    
+    db.delete(language)
+    db.commit()
+    return {"message": "Programming language deleted successfully"}
 
 @router.post("/exam-templates/generate-ai")
 async def generate_ai_exam_template(
@@ -385,7 +576,7 @@ async def generate_ai_exam_template(
             duration_minutes=duration_minutes,
             questions=[],  # Empty initially
             is_active=False,  # Draft mode
-            metadata={
+            exam_metadata={
                 "status": "generating",
                 "created_via": "ai_generation",
                 "config": config
@@ -513,7 +704,7 @@ async def generate_ai_exam_template(
         logger.info(f"🔄 Workflow will update exam with AI-generated questions")
         
         # Update draft exam metadata to indicate N8N processing
-        draft_exam.metadata = {
+        draft_exam.exam_metadata = {
             "status": "processing_via_n8n",
             "created_via": "ai_generation_n8n",
             "config": config,
@@ -796,7 +987,7 @@ async def save_exam_draft(
             duration_minutes=draft_data.get("duration_minutes", 60),
             questions=[],  # Empty questions array
             is_active=False,  # Draft status
-            metadata=metadata
+            exam_metadata=metadata
         )
         
         db.add(exam_template)
@@ -858,14 +1049,14 @@ async def update_exam_with_questions(
         
         if update_data.get("metadata"):
             # Merge existing metadata with new metadata
-            existing_metadata = exam_template.metadata or {}
+            existing_metadata = exam_template.exam_metadata or {}
             # Convert to dict if it's not already
             if not isinstance(existing_metadata, dict):
                 existing_metadata = {}
             # Create new metadata dict
             new_metadata = existing_metadata.copy()
             new_metadata.update(update_data["metadata"])
-            exam_template.metadata = new_metadata
+            exam_template.exam_metadata = new_metadata
         
         # Activate the exam (no longer draft)
         if update_data.get("is_active", True):
@@ -887,7 +1078,7 @@ async def update_exam_with_questions(
             "programming_language": exam_template.programming_language,
             "duration_minutes": exam_template.duration_minutes,
             "questions": exam_template.questions,
-            "metadata": exam_template.metadata,
+            "metadata": exam_template.exam_metadata,
             "is_active": exam_template.is_active,
             "created_at": exam_template.created_at.isoformat(),
             "updated_at": exam_template.updated_at.isoformat() if exam_template.updated_at else None
@@ -1028,4 +1219,154 @@ async def save_ai_generated_exam(
         raise
     except Exception as e:
         logger.error(f"Error saving AI-generated exam: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+# Candidate Management Endpoints
+@router.get("/candidates")
+async def list_candidates(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """List all candidates with their latest exam status"""
+    candidates = db.query(Candidate).offset(skip).limit(limit).all()
+    
+    candidate_list = []
+    for candidate in candidates:
+        # Get latest exam session to determine status and position
+        latest_session = db.query(ExamSession).filter(
+            ExamSession.candidate_id == candidate.id
+        ).order_by(ExamSession.created_at.desc()).first()
+        
+        status = "รอสอบ"  # Default status
+        position = "ไม่ระบุ"
+        
+        if latest_session:
+            if latest_session.status == "completed":
+                # Check if passed based on score
+                if latest_session.score and latest_session.score >= 70:
+                    status = "ผ่านการสอบ"
+                else:
+                    status = "ไม่ผ่านการสอบ"
+            elif latest_session.status == "in_progress":
+                status = "กำลังสอบ"
+            elif latest_session.status == "cancelled":
+                status = "ยกเลิก"
+            
+            # Get position from exam template
+            if latest_session.exam_template and latest_session.exam_template.position:
+                position = latest_session.exam_template.position.name
+        
+        candidate_list.append({
+            "id": candidate.id,
+            "first_name": candidate.first_name,
+            "last_name": candidate.last_name,
+            "email": candidate.email,
+            "phone": candidate.phone,
+            "position": position,
+            "status": status,
+            "created_at": candidate.created_at.strftime("%Y-%m-%d")
+        })
+    
+    return candidate_list
+
+@router.post("/candidates", response_model=CandidateResponse)
+async def create_candidate(candidate: CandidateCreate, db: Session = Depends(get_db)):
+    """Create a new candidate"""
+    # Check if email already exists
+    existing_candidate = db.query(Candidate).filter(Candidate.email == candidate.email).first()
+    if existing_candidate:
+        raise HTTPException(status_code=400, detail="อีเมลนี้มีอยู่ในระบบแล้ว")
+    
+    db_candidate = Candidate(
+        first_name=candidate.first_name,
+        last_name=candidate.last_name,
+        email=candidate.email,
+        phone=candidate.phone
+    )
+    db.add(db_candidate)
+    db.commit()
+    db.refresh(db_candidate)
+    return db_candidate
+
+@router.get("/candidates/{candidate_id}", response_model=CandidateResponse)
+async def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
+    """Get candidate by ID"""
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="ไม่พบผู้สมัคร")
+    return candidate
+
+@router.put("/candidates/{candidate_id}", response_model=CandidateResponse)
+async def update_candidate(
+    candidate_id: int, 
+    candidate_update: CandidateUpdate, 
+    db: Session = Depends(get_db)
+):
+    """Update candidate (supports position and programming language assignment)"""
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="ไม่พบผู้สมัคร")
+    
+    # Check if email is taken by another candidate (if email is being updated)
+    if candidate_update.email and candidate_update.email != candidate.email:
+        existing_candidate = db.query(Candidate).filter(
+            Candidate.email == candidate_update.email,
+            Candidate.id != candidate_id
+        ).first()
+        if existing_candidate:
+            raise HTTPException(status_code=400, detail="อีเมลนี้มีอยู่ในระบบแล้ว")
+    
+    # Update basic fields if provided
+    if candidate_update.first_name:
+        candidate.first_name = candidate_update.first_name
+    if candidate_update.last_name:
+        candidate.last_name = candidate_update.last_name
+    if candidate_update.email:
+        candidate.email = candidate_update.email
+    if candidate_update.phone is not None:  # Allow empty string
+        candidate.phone = candidate_update.phone
+    
+    # Handle position assignment
+    if candidate_update.position_id:
+        position = db.query(Position).filter(Position.id == candidate_update.position_id).first()
+        if not position:
+            raise HTTPException(status_code=404, detail="ไม่พบตำแหน่งที่ระบุ")
+        # Note: If you want to store position_id in Candidate model, you'll need to add it to the database schema
+        # For now, we'll just validate that the position exists
+    
+    # Handle programming language assignment  
+    if candidate_update.programming_language_id:
+        programming_language = db.query(ProgrammingLanguage).filter(
+            ProgrammingLanguage.id == candidate_update.programming_language_id
+        ).first()
+        if not programming_language:
+            raise HTTPException(status_code=404, detail="ไม่พบภาษาโปรแกรมมิ่งที่ระบุ")
+        # Note: If you want to store programming_language_id in Candidate model, you'll need to add it to the database schema
+    
+    db.commit()
+    db.refresh(candidate)
+    return candidate
+
+@router.delete("/candidates/{candidate_id}")
+async def delete_candidate(candidate_id: int, db: Session = Depends(get_db)):
+    """Delete candidate"""
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="ไม่พบผู้สมัคร")
+    
+    # Check if candidate has active exam sessions
+    active_sessions = db.query(ExamSession).filter(
+        ExamSession.candidate_id == candidate_id,
+        ExamSession.status.in_(["scheduled", "in_progress"])
+    ).count()
+    
+    if active_sessions > 0:
+        raise HTTPException(
+            status_code=400, 
+            detail="ไม่สามารถลบผู้สมัครที่มีการสอบที่กำลังดำเนินการอยู่"
+        )
+    
+    db.delete(candidate)
+    db.commit()
+    return {"message": "ลบผู้สมัครเรียบร้อยแล้ว"} 

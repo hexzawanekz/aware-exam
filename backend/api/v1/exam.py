@@ -21,11 +21,10 @@ security = HTTPBearer()
 websocket_manager = WebSocketManager()
 
 def get_detection_service(session_id: str):
-    """Select detection service based on session ID"""
-    if session_id == "real-session-2":
-        return yolo11_pose_service
-    else:
-        return face_detection_service
+    """Select detection service - YOLO11 is now the default for all sessions including demo sessions"""
+    # YOLO11 pose + segmentation is now the default for ALL sessions (demo and real)
+    print(f"🤖 [BACKEND] Using YOLO11 detection service for session: {session_id}")
+    return yolo11_pose_service
 
 @router.post("/sessions/{session_id}/start")
 async def start_exam_session(
@@ -236,6 +235,61 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, db: Session 
                 
     except WebSocketDisconnect:
         websocket_manager.disconnect(session_id)
+
+@router.get("/sessions")
+async def get_available_exam_sessions(
+    db: Session = Depends(get_db)
+):
+    """Get list of available exam sessions"""
+    try:
+        # Get all active exam sessions that are available for taking
+        sessions = db.query(ExamSession).filter(
+            ExamSession.status.in_(["pending", "in_progress"])
+        ).all()
+        
+        session_list = []
+        for session in sessions:
+            session_data = {
+                "id": session.session_id,
+                "name": f"🤖 {session.exam_template.title} - {session.candidate.full_name}",
+                "duration": session.exam_template.duration_minutes,
+                "status": session.status,
+                "candidate_name": session.candidate.full_name,
+                "exam_title": session.exam_template.title,
+                "created_at": session.created_at.isoformat() if session.created_at else None
+            }
+            session_list.append(session_data)
+        
+        # If no sessions found, create a default test session
+        if not session_list:
+            session_list = [
+                {
+                    "id": "test-session-1", 
+                    "name": "🤖 ระบบตรวจจับการโกง (YOLO11 AI)", 
+                    "duration": 30,
+                    "status": "pending",
+                    "candidate_name": "Test Candidate",
+                    "exam_title": "AI Proctoring Test",
+                    "created_at": datetime.utcnow().isoformat()
+                }
+            ]
+        
+        return session_list
+        
+    except Exception as e:
+        print(f"Error getting exam sessions: {e}")
+        # Return default session if database error
+        return [
+            {
+                "id": "test-session-1", 
+                "name": "🤖 ระบบตรวจจับการโกง (YOLO11 AI)", 
+                "duration": 30,
+                "status": "pending",
+                "candidate_name": "Test Candidate", 
+                "exam_title": "AI Proctoring Test",
+                "created_at": datetime.utcnow().isoformat()
+            }
+        ]
 
 @router.get("/sessions/{session_id}/status")
 async def get_exam_status(
