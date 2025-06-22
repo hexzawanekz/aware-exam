@@ -30,6 +30,21 @@ class Department(Base):
     company = relationship("Company", back_populates="departments")
     positions = relationship("Position", back_populates="department")
 
+class ProgrammingLanguage(Base):
+    __tablename__ = "programming_languages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False, unique=True, index=True)
+    description = Column(Text, nullable=True)
+    version = Column(String(50), nullable=True)  # e.g., "3.9", "ES6", "11"
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    positions = relationship("Position", back_populates="programming_language")
+    exam_templates = relationship("ExamTemplate", back_populates="programming_language_obj")
+
 class Position(Base):
     __tablename__ = "positions"
     
@@ -37,12 +52,14 @@ class Position(Base):
     department_id = Column(Integer, ForeignKey("departments.id"))
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
-    programming_languages = Column(JSON, nullable=True)  # ["Python", "JavaScript", "Java"]
+    programming_language_id = Column(Integer, ForeignKey("programming_languages.id"), nullable=True)
+    programming_languages = Column(JSON, nullable=True)  # ["Python", "JavaScript", "Java"] - Keep for backward compatibility
     required_skills = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     department = relationship("Department", back_populates="positions")
+    programming_language = relationship("ProgrammingLanguage", back_populates="positions")
     exam_templates = relationship("ExamTemplate", back_populates="position")
 
 class ExamTemplate(Base):
@@ -52,15 +69,18 @@ class ExamTemplate(Base):
     position_id = Column(Integer, ForeignKey("positions.id"))
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
-    programming_language = Column(String(50), nullable=False, index=True)
+    programming_language = Column(String(50), nullable=False, index=True)  # Keep for backward compatibility
+    programming_language_id = Column(Integer, ForeignKey("programming_languages.id"), nullable=True)
     duration_minutes = Column(Integer, default=60)
     google_form_id = Column(String(255), nullable=True)  # สำหรับ import จาก Google Form
     questions = Column(JSON, nullable=True)  # เก็บข้อสอบ
     is_active = Column(Boolean, default=True)
+    exam_metadata = Column(JSON, nullable=True)  # Additional metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     position = relationship("Position", back_populates="exam_templates")
+    programming_language_obj = relationship("ProgrammingLanguage", back_populates="exam_templates")
     exam_sessions = relationship("ExamSession", back_populates="exam_template")
 
 class Candidate(Base):

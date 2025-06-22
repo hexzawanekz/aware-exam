@@ -86,13 +86,18 @@ const ExamInterface = () => {
 
   const [examStarted, setExamStarted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lastSavedTime, setLastSavedTime] = useState(null);
+  const [saveTimeouts, setSaveTimeouts] = useState({});
   const [webcamReady, setWebcamReady] = useState(false);
 
-  // Timer setup
-  const expiryTimestamp = new Date();
-  expiryTimestamp.setSeconds(
-    expiryTimestamp.getSeconds() + (examData?.duration_minutes || 60) * 60
+  // Timer setup - calculate expiry based on exam status
+  // State for timer expiry timestamp
+  const [timerExpiryTimestamp, setTimerExpiryTimestamp] = useState(
+    new Date(Date.now() + 60 * 60 * 1000) // Default 1 hour
   );
+
+  // Timer key to force re-initialization
+  const [timerKey, setTimerKey] = useState(0);
 
   const {
     seconds,
@@ -105,9 +110,34 @@ const ExamInterface = () => {
     resume,
     restart,
   } = useTimer({
-    expiryTimestamp,
+    expiryTimestamp: timerExpiryTimestamp,
     onExpire: () => handleSubmitExam(true), // Auto-submit when time expires
+    key: timerKey, // Force re-initialization when key changes
   });
+
+  // Effect to restart timer when expiry timestamp changes
+  useEffect(() => {
+    if (timerExpiryTimestamp) {
+      const now = new Date();
+      const remainingMs = timerExpiryTimestamp.getTime() - now.getTime();
+      const remainingSeconds = Math.floor(remainingMs / 1000);
+      const displayMinutes = Math.floor(remainingSeconds / 60);
+      const displaySeconds = remainingSeconds % 60;
+
+      console.log(
+        `🔄 Timer expiry timestamp changed, restarting timer to: ${timerExpiryTimestamp.toISOString()}`
+      );
+      console.log(
+        `⏰ Should display: ${displayMinutes}:${displaySeconds
+          .toString()
+          .padStart(2, "0")}`
+      );
+      console.log(`📏 Remaining milliseconds: ${remainingMs}`);
+      console.log(`🔑 Timer key: ${timerKey}`);
+
+      restart(timerExpiryTimestamp);
+    }
+  }, [timerExpiryTimestamp, timerKey, restart]);
 
   // Initialize face detection status for all sessions
   useEffect(() => {
@@ -139,7 +169,100 @@ const ExamInterface = () => {
           `/api/v1/exam/sessions/${sessionId}/status`
         );
         console.log("✅ Database exam data loaded successfully");
+        console.log("📊 Backend Response:", {
+          status: apiResponse.status,
+          remaining_time_seconds: apiResponse.remaining_time_seconds,
+          start_time: apiResponse.start_time,
+          duration_minutes: apiResponse.duration_minutes,
+        });
         setExamData(apiResponse);
+
+        // Load saved answers for resume functionality
+        const localStorageKey = `exam_answers_${sessionId}`;
+        let mergedAnswers = {};
+
+        // First, load from localStorage
+        try {
+          const localAnswers = JSON.parse(
+            localStorage.getItem(localStorageKey) || "{}"
+          );
+          Object.entries(localAnswers).forEach(([questionId, answerData]) => {
+            if (answerData && answerData.answer !== undefined) {
+              mergedAnswers[questionId] = answerData.answer;
+            }
+          });
+          const codingAnswers = Object.entries(localAnswers).filter(
+            ([_, data]) => data.answerLength && data.answerLength > 50
+          ).length;
+          console.log(
+            `💾 Loaded ${
+              Object.keys(mergedAnswers).length
+            } answers from localStorage (${codingAnswers} coding answers)`
+          );
+        } catch (error) {
+          console.error("❌ Failed to load from localStorage:", error);
+        }
+
+        // Then, merge with backend answers (backend takes priority for conflicts)
+        if (apiResponse.answers) {
+          Object.entries(apiResponse.answers).forEach(
+            ([questionId, answerData]) => {
+              // Handle both old format (direct answer) and new format (with timestamp)
+              if (
+                typeof answerData === "object" &&
+                answerData.answer !== undefined
+              ) {
+                mergedAnswers[questionId] = answerData.answer;
+              } else {
+                mergedAnswers[questionId] = answerData;
+              }
+            }
+          );
+          console.log(
+            `🔄 Merged with ${
+              Object.keys(apiResponse.answers).length
+            } answers from backend`
+          );
+        }
+
+        setAnswers(mergedAnswers);
+        console.log(
+          `✅ Total resumed answers: ${Object.keys(mergedAnswers).length}`
+        );
+
+        // Auto-resume exam if it's already in progress (not failed)
+        if (
+          apiResponse.status === "in_progress" &&
+          apiResponse.remaining_time_seconds > 0
+        ) {
+          setExamStarted(true);
+          // Set timer expiry timestamp based on remaining time from backend
+          const now = new Date();
+          const expiryTime = new Date(
+            now.getTime() + apiResponse.remaining_time_seconds * 1000
+          );
+          console.log(
+            `⏰ Timer Debug: Now=${now.toISOString()}, Remaining=${
+              apiResponse.remaining_time_seconds
+            }s, ExpiryTime=${expiryTime.toISOString()}`
+          );
+          console.log(
+            `🔧 Setting timer expiry to: ${expiryTime.toISOString()} (${
+              apiResponse.remaining_time_seconds
+            } seconds from now)`
+          );
+          setTimerExpiryTimestamp(expiryTime);
+          setTimerKey((prev) => prev + 1); // Force timer re-initialization
+          console.log(
+            `🔄 Resuming exam with ${apiResponse.remaining_time_seconds} seconds remaining...`
+          );
+        } else if (
+          apiResponse.status === "failed" ||
+          apiResponse.remaining_time_seconds <= 0
+        ) {
+          // Don't auto-resume failed or expired sessions
+          console.log("⚠️ Session is failed or expired, not auto-resuming");
+        }
       } catch (error) {
         console.error("❌ Error loading exam data from database:", error);
         // Redirect to exam selection if session not found
@@ -151,6 +274,50 @@ const ExamInterface = () => {
       loadExamData();
     }
   }, [sessionId, navigate]);
+
+  // Periodic sync of localStorage answers to backend (every 30 seconds)
+  useEffect(() => {
+    if (!examStarted || !sessionId) return;
+
+    const syncInterval = setInterval(async () => {
+      const localStorageKey = `exam_answers_${sessionId}`;
+      try {
+        const localAnswers = JSON.parse(
+          localStorage.getItem(localStorageKey) || "{}"
+        );
+        const answersToSync = Object.keys(localAnswers);
+
+        if (answersToSync.length > 0) {
+          console.log(
+            `🔄 Syncing ${answersToSync.length} answers from localStorage to backend...`
+          );
+
+          // Sync each answer that might not be in backend yet
+          for (const [questionId, answerData] of Object.entries(localAnswers)) {
+            try {
+              await api.request(
+                `/api/v1/exam/sessions/${sessionId}/save-answer`,
+                {
+                  method: "POST",
+                  body: JSON.stringify({
+                    question_id: questionId,
+                    answer: answerData.answer,
+                    timestamp: answerData.timestamp,
+                  }),
+                }
+              );
+            } catch (error) {
+              console.error(`❌ Failed to sync answer ${questionId}:`, error);
+            }
+          }
+        }
+      } catch (error) {
+        console.error("❌ Failed to sync localStorage to backend:", error);
+      }
+    }, 30000); // Sync every 30 seconds
+
+    return () => clearInterval(syncInterval);
+  }, [examStarted, sessionId]);
 
   // Security measures
   useEffect(() => {
@@ -1011,22 +1178,108 @@ const ExamInterface = () => {
 
       setExamStarted(true);
 
-      // Start timer
+      // Start timer with full duration for new exam
       const newExpiryTime = new Date();
       newExpiryTime.setSeconds(
         newExpiryTime.getSeconds() + (examData?.duration_minutes || 60) * 60
       );
-      restart(newExpiryTime);
+      setTimerExpiryTimestamp(newExpiryTime);
+      setTimerKey((prev) => prev + 1); // Force timer re-initialization
     } catch (error) {
       console.error("Error starting exam:", error);
     }
   };
 
-  const handleAnswerChange = (questionId, answer) => {
+  const handleAnswerChange = async (questionId, answer) => {
+    // Update local state immediately
     setAnswers((prev) => ({
       ...prev,
       [questionId]: answer,
     }));
+
+    // Save to localStorage immediately for offline persistence
+    const localStorageKey = `exam_answers_${sessionId}`;
+    try {
+      const existingAnswers = JSON.parse(
+        localStorage.getItem(localStorageKey) || "{}"
+      );
+      const answerLength = answer ? answer.toString().length : 0;
+      const updatedAnswers = {
+        ...existingAnswers,
+        [questionId]: {
+          answer: answer,
+          timestamp: new Date().toISOString(),
+          savedAt: Date.now(),
+          answerLength: answerLength,
+          answerType: answerLength > 50 ? "coding" : "choice",
+        },
+      };
+      localStorage.setItem(localStorageKey, JSON.stringify(updatedAnswers));
+      setLastSavedTime(new Date());
+
+      // Enhanced logging for coding vs choice answers
+      if (answerLength > 50) {
+        console.log(
+          `💾 Saved coding answer to localStorage for question ${questionId} (${answerLength} characters)`
+        );
+      } else {
+        console.log(
+          `💾 Saved answer to localStorage for question ${questionId}`
+        );
+      }
+    } catch (error) {
+      console.error("❌ Failed to save to localStorage:", error);
+
+      // Handle storage quota exceeded for large coding answers
+      if (error.name === "QuotaExceededError" || error.code === 22) {
+        console.warn(
+          "⚠️ localStorage quota exceeded, trying to save simplified version..."
+        );
+        try {
+          // Save just the answer without metadata for large content
+          const simpleAnswers = JSON.parse(
+            localStorage.getItem(localStorageKey) || "{}"
+          );
+          simpleAnswers[questionId] = answer;
+          localStorage.setItem(localStorageKey, JSON.stringify(simpleAnswers));
+          setLastSavedTime(new Date());
+          console.log(
+            `💾 Saved simplified coding answer for question ${questionId}`
+          );
+        } catch (fallbackError) {
+          console.error(
+            "❌ Failed to save even simplified answer:",
+            fallbackError
+          );
+          // Still show save indicator even if localStorage fails
+          setLastSavedTime(new Date());
+        }
+      }
+    }
+
+    // Auto-save to backend if exam has started
+    if (examStarted && sessionId) {
+      try {
+        await api.request(`/api/v1/exam/sessions/${sessionId}/save-answer`, {
+          method: "POST",
+          body: JSON.stringify({
+            question_id: questionId,
+            answer: answer,
+            timestamp: new Date().toISOString(),
+          }),
+        });
+        const answerLength = answer ? answer.toString().length : 0;
+        if (answerLength > 50) {
+          console.log(
+            `✅ Auto-saved coding answer for question ${questionId} (${answerLength} characters)`
+          );
+        } else {
+          console.log(`✅ Auto-saved answer for question ${questionId}`);
+        }
+      } catch (error) {
+        console.error("❌ Failed to auto-save answer:", error);
+      }
+    }
   };
 
   const handleSubmitExam = async (isAutoSubmit = false) => {
@@ -1044,6 +1297,15 @@ const ExamInterface = () => {
           submissionTime: new Date().toISOString(),
         }),
       });
+
+      // Clean up localStorage after successful submission
+      const localStorageKey = `exam_answers_${sessionId}`;
+      try {
+        localStorage.removeItem(localStorageKey);
+        console.log(`🧹 Cleaned up localStorage for session ${sessionId}`);
+      } catch (error) {
+        console.error("❌ Failed to clean localStorage:", error);
+      }
 
       // Exit fullscreen
       if (screenfull.isEnabled && screenfull.isFullscreen) {
@@ -1085,8 +1347,21 @@ const ExamInterface = () => {
             {examData.questions.length}
           </Typography>
           <Typography variant="body1" sx={{ mb: 3 }}>
-            {question.text}
+            {question.question}
           </Typography>
+
+          {/* Show criteria and points for all question types */}
+          {question.Criteria && (
+            <Box sx={{ mb: 2, p: 2, bgcolor: "grey.50", borderRadius: 1 }}>
+              <Typography variant="body2" color="primary" sx={{ mb: 1 }}>
+                <strong>🎯 Criteria:</strong> {question.Criteria}
+              </Typography>
+              <Typography variant="body2" color="secondary">
+                <strong>💎 Points:</strong> {question.points || question.score}{" "}
+                points
+              </Typography>
+            </Box>
+          )}
 
           {question.type === "multiple_choice" && (
             <Box>
@@ -1094,18 +1369,165 @@ const ExamInterface = () => {
                 <Box key={index} sx={{ mb: 1 }}>
                   <Button
                     variant={
-                      answers[question.id] === option.id
-                        ? "contained"
-                        : "outlined"
+                      answers[question.id] === option ? "contained" : "outlined"
                     }
                     fullWidth
-                    onClick={() => handleAnswerChange(question.id, option.id)}
+                    onClick={() => handleAnswerChange(question.id, option)}
                     sx={{ textAlign: "left", justifyContent: "flex-start" }}
                   >
-                    {option.text}
+                    {option}
                   </Button>
                 </Box>
               ))}
+            </Box>
+          )}
+
+          {question.type === "coding" && (
+            <Box>
+              {question.sample_input && (
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <strong>Sample Input:</strong> {question.sample_input}
+                </Typography>
+              )}
+              {question.sample_output && (
+                <Typography variant="body2" sx={{ mb: 2 }}>
+                  <strong>Sample Output:</strong> {question.sample_output}
+                </Typography>
+              )}
+
+              {/* Code Editor with Line Numbers */}
+              <Box
+                sx={{
+                  border: "1px solid #ccc",
+                  borderRadius: 1,
+                  overflow: "hidden",
+                  backgroundColor: "#f8f9fa",
+                }}
+              >
+                {/* Editor Header */}
+                <Box
+                  sx={{
+                    backgroundColor: "#e9ecef",
+                    padding: "8px 12px",
+                    borderBottom: "1px solid #ccc",
+                    fontSize: "12px",
+                    color: "#6c757d",
+                    fontFamily: "monospace",
+                  }}
+                >
+                  💻 Code Editor - Question {currentQuestion + 1}
+                </Box>
+
+                {/* Code Area with Line Numbers */}
+                <Box
+                  sx={{
+                    display: "flex",
+                    minHeight: 250,
+                    backgroundColor: "#ffffff",
+                  }}
+                >
+                  {/* Line Numbers */}
+                  <Box
+                    sx={{
+                      backgroundColor: "#f8f9fa",
+                      borderRight: "1px solid #e9ecef",
+                      padding: "12px 8px",
+                      fontSize: "14px",
+                      fontFamily: "monospace",
+                      color: "#6c757d",
+                      lineHeight: "20px",
+                      userSelect: "none",
+                      minWidth: "50px",
+                      textAlign: "right",
+                    }}
+                  >
+                    {(() => {
+                      const lines = (answers[question.id] || "").split("\n");
+                      const totalLines = Math.max(15, lines.length);
+
+                      return Array.from({ length: totalLines }, (_, index) => (
+                        <div
+                          key={index}
+                          style={{
+                            height: "20px",
+                            color: index < lines.length ? "#495057" : "#ced4da",
+                            fontWeight: index < lines.length ? "normal" : "300",
+                          }}
+                        >
+                          {index + 1}
+                        </div>
+                      ));
+                    })()}
+                  </Box>
+
+                  {/* Code Input Area */}
+                  <textarea
+                    value={answers[question.id] || ""}
+                    onChange={(e) =>
+                      handleAnswerChange(question.id, e.target.value)
+                    }
+                    onKeyDown={(e) => {
+                      // Handle Tab key for indentation
+                      if (e.key === "Tab") {
+                        e.preventDefault();
+                        const start = e.target.selectionStart;
+                        const end = e.target.selectionEnd;
+                        const value = e.target.value;
+                        const newValue =
+                          value.substring(0, start) +
+                          "    " +
+                          value.substring(end);
+                        handleAnswerChange(question.id, newValue);
+                        // Set cursor position after the inserted spaces
+                        setTimeout(() => {
+                          e.target.selectionStart = e.target.selectionEnd =
+                            start + 4;
+                        }, 0);
+                      }
+                    }}
+                    placeholder={`// ${t("exam.enter_answer")}
+// Example:
+function solution() {
+    // Your code here
+    return result;
+}`}
+                    style={{
+                      flex: 1,
+                      border: "none",
+                      outline: "none",
+                      padding: "12px",
+                      fontSize: "14px",
+                      fontFamily:
+                        "'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace",
+                      lineHeight: "20px",
+                      resize: "none",
+                      backgroundColor: "transparent",
+                      minHeight: "226px", // 250px - header height
+                      scrollbarWidth: "thin",
+                      scrollbarColor: "#c1c1c1 #f1f1f1",
+                    }}
+                  />
+                </Box>
+
+                {/* Editor Footer with Stats */}
+                <Box
+                  sx={{
+                    backgroundColor: "#f8f9fa",
+                    padding: "4px 12px",
+                    borderTop: "1px solid #e9ecef",
+                    fontSize: "11px",
+                    color: "#6c757d",
+                    display: "flex",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span>
+                    Lines: {(answers[question.id] || "").split("\n").length} |
+                    Characters: {(answers[question.id] || "").length}
+                  </span>
+                  <span>💾 Auto-save enabled</span>
+                </Box>
+              </Box>
             </Box>
           )}
 
@@ -1176,6 +1598,17 @@ const ExamInterface = () => {
             variant="outlined"
           />
 
+          {/* Auto-save indicator */}
+          {lastSavedTime && (
+            <Chip
+              size="small"
+              icon={<CheckCircle />}
+              label={`💾 Saved ${new Date(lastSavedTime).toLocaleTimeString()}`}
+              color="success"
+              variant="outlined"
+            />
+          )}
+
           {/* Face detection status */}
           <Chip
             icon={faceDetectionStatus.detected ? <CheckCircle /> : <Error />}
@@ -1204,19 +1637,39 @@ const ExamInterface = () => {
           {!examStarted ? (
             <Paper sx={{ p: 4, textAlign: "center" }}>
               <Typography variant="h4" gutterBottom>
-                {t("exam.start_exam")}
+                {examData.status === "in_progress" &&
+                examData.remaining_time_seconds > 0
+                  ? t("exam.resume_exam")
+                  : t("exam.start_exam")}
               </Typography>
               <Typography variant="body1" sx={{ mb: 3 }}>
                 {t("exam.duration")}: {examData.duration_minutes}{" "}
                 {t("exam.minutes")}
               </Typography>
+              {examData.status === "in_progress" &&
+                examData.remaining_time_seconds > 0 &&
+                Object.keys(answers).length > 0 && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    {t("exam.exam_resumed")} ({Object.keys(answers).length}{" "}
+                    คำตอบ)
+                  </Alert>
+                )}
+              {(examData.status === "failed" ||
+                examData.remaining_time_seconds <= 0) && (
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  เซสชันหมดเวลาหรือมีปัญหา - คลิกเพื่อเริ่มใหม่
+                </Alert>
+              )}
               <Button
                 variant="contained"
                 size="large"
                 onClick={handleStartExam}
                 disabled={!webcamReady}
               >
-                {t("exam.start_exam")}
+                {examData.status === "in_progress" &&
+                examData.remaining_time_seconds > 0
+                  ? t("exam.resume_exam")
+                  : t("exam.start_exam")}
               </Button>
               {!webcamReady && (
                 <Alert severity="warning" sx={{ mt: 2 }}>

@@ -36,7 +36,7 @@ async def start_exam_session(
     if not session:
         raise HTTPException(status_code=404, detail="ไม่พบเซสชันการสอบ")
     
-    if session.status != "pending":
+    if session.status not in ["pending", "scheduled"]:
         raise HTTPException(status_code=400, detail="ไม่สามารถเริ่มการสอบได้ เซสชันอยู่ในสถานะ: " + session.status)
     
     # โหลดข้อสอบและ random คำถาม
@@ -48,7 +48,9 @@ async def start_exam_session(
     
     # อัพเดทสถานะเซสชัน
     session.status = "in_progress"
-    session.start_time = datetime.utcnow()
+    # Only set start_time if it's not already set (don't reset for resume)
+    if session.start_time is None:
+        session.start_time = datetime.utcnow()
     session.randomized_questions = randomized_questions
     
     # โหลดใบหน้าผู้สมัครสำหรับ face recognition
@@ -63,9 +65,16 @@ async def start_exam_session(
     return {
         "message": "เริ่มการสอบเรียบร้อยแล้ว",
         "session_id": session_id,
+        "name": exam_template.name,
+        "description": exam_template.description,
+        "status": session.status,
         "questions": randomized_questions,
         "duration_minutes": exam_template.duration_minutes,
-        "start_time": session.start_time.isoformat()
+        "remaining_time_seconds": exam_template.duration_minutes * 60,
+        "start_time": session.start_time.isoformat(),
+        "candidate_id": session.candidate_id,
+        "candidate_name": f"{session.candidate.first_name} {session.candidate.last_name}",
+        "answers": session.answers or {}
     }
 
 @router.post("/verify-face")
@@ -144,6 +153,38 @@ async def verify_face(
     
     return result
 
+@router.post("/sessions/{session_id}/save-answer")
+async def save_answer(
+    session_id: str,
+    answer_data: Dict,
+    db: Session = Depends(get_db)
+):
+    """บันทึกคำตอบของผู้สมัคร (auto-save)"""
+    session = db.query(ExamSession).filter(ExamSession.session_id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="ไม่พบเซสชันการสอบ")
+    
+    # อัพเดทคำตอบ
+    current_answers = session.answers or {}
+    question_id = str(answer_data.get("question_id"))
+    answer = answer_data.get("answer")
+    timestamp = answer_data.get("timestamp", datetime.utcnow().isoformat())
+    
+    current_answers[question_id] = {
+        "answer": answer,
+        "timestamp": timestamp
+    }
+    
+    session.answers = current_answers
+    session.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return {
+        "message": "บันทึกคำตอบเรียบร้อยแล้ว",
+        "question_id": question_id,
+        "timestamp": timestamp
+    }
+
 @router.post("/sessions/{session_id}/submit")
 async def submit_exam(
     session_id: str,
@@ -160,8 +201,23 @@ async def submit_exam(
     if session.status != "in_progress":
         raise HTTPException(status_code=400, detail="ไม่สามารถส่งข้อสอบได้ เซสชันไม่ได้อยู่ในระหว่างการสอบ")
     
-    # บันทึกคำตอบ
-    session.answers = answers.get("answers", {})
+    # บันทึกคำตอบ (รองรับทั้งรูปแบบเก่าและใหม่)
+    submitted_answers = answers.get("answers", {})
+    current_answers = session.answers or {}
+    
+    # Merge submitted answers with existing answers
+    for question_id, answer in submitted_answers.items():
+        if isinstance(answer, dict) and "answer" in answer:
+            # Already in new format
+            current_answers[question_id] = answer
+        else:
+            # Convert old format to new format
+            current_answers[question_id] = {
+                "answer": answer,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+    
+    session.answers = current_answers
     session.end_time = datetime.utcnow()
     session.status = "submitted"  # Changed from "completed" to "submitted"
     
@@ -354,16 +410,33 @@ async def get_exam_status(
     
     # คำนวณเวลาที่เหลือ
     remaining_time = None
-    if session.start_time and session.status == "in_progress":
+    if session.start_time and session.status in ["in_progress", "failed"]:
+        # Calculate remaining time for any session that has started
         exam_duration = timedelta(minutes=session.exam_template.duration_minutes)
         elapsed_time = datetime.utcnow() - session.start_time
         remaining_time = max(0, (exam_duration - elapsed_time).total_seconds())
+    elif session.status in ["pending", "scheduled"]:
+        # For pending/scheduled sessions, show full duration
+        remaining_time = session.exam_template.duration_minutes * 60
+    else:
+        # For other statuses (completed, submitted), show 0
+        remaining_time = 0
+    
+    # Get exam questions (use randomized if available, otherwise original)
+    questions = session.randomized_questions if session.randomized_questions else session.exam_template.questions or []
     
     return {
         "session_id": session_id,
+        "name": session.exam_template.name,
+        "description": session.exam_template.description,
         "status": session.status,
         "start_time": session.start_time.isoformat() if session.start_time else None,
+        "duration_minutes": session.exam_template.duration_minutes,
         "remaining_time_seconds": remaining_time,
+        "questions": questions,
+        "candidate_id": session.candidate_id,
+        "candidate_name": f"{session.candidate.first_name} {session.candidate.last_name}",
+        "answers": session.answers or {},
         "face_verification_count": session.face_verification_count,
         "suspicious_activities": {
             "absent_frames": session.absent_frames_count,

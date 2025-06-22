@@ -14,8 +14,8 @@ import asyncio
 from api.v1 import exam
 from api.v1 import admin
 from api.v1 import candidate
-from core.database import engine, SessionLocal, get_db
-from models.database import Base, ExamSession, Candidate
+from core.database import engine, SessionLocal, get_db, Base
+from models.exam import ExamSession, Candidate
 from services.face_detection import FaceDetectionService
 from services.proctoring import ProctoringService
 

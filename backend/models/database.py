@@ -102,6 +102,7 @@ class ExamSession(Base):
     __tablename__ = "exam_sessions"
     
     id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(255), unique=True, nullable=False, index=True)
     candidate_id = Column(Integer, ForeignKey("candidates.id"), nullable=False)
     exam_template_id = Column(Integer, ForeignKey("exam_templates.id"), nullable=False)
     start_time = Column(DateTime, nullable=False)

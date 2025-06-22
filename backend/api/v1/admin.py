@@ -7,7 +7,7 @@ import json
 import httpx
 
 from core.database import get_db
-from models.database import Company, Department, Position, ProgrammingLanguage, ExamTemplate, Candidate, ExamSession
+from models.exam import Company, Department, Position, ProgrammingLanguage, ExamTemplate, Candidate, ExamSession
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -91,16 +91,19 @@ class DashboardStats(BaseModel):
 
 # Pydantic models for AI Exam Generation
 class AIExamQuestion(BaseModel):
-    id: int
+    id: Optional[int] = None
     type: str  # "multiple_choice" or "coding"
     question: str
+    Criteria: Optional[str] = None  # AI-generated criteria for skill measurement
     options: Optional[List[Dict[str, str]]] = None  # สำหรับ multiple choice
     correct_answer: Optional[str] = None
     explanation: Optional[str] = None
     description: Optional[str] = None  # สำหรับ coding questions
     sample_input: Optional[str] = None
     sample_output: Optional[str] = None
-    score: int = 10
+    expected_output: Optional[str] = None  # For coding questions
+    points: int = 10  # AI-assigned points (should sum to 100)
+    score: Optional[int] = None  # Backward compatibility
 
 class AIExamData(BaseModel):
     exam_title: str
@@ -310,8 +313,15 @@ async def update_department(
     if not department:
         raise HTTPException(status_code=404, detail="Department not found")
     
+    # Verify company exists if company_id is being changed
+    if department_update.company_id != department.company_id:
+        company = db.query(Company).filter(Company.id == department_update.company_id).first()
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+    
     department.name = department_update.name
     department.description = department_update.description
+    department.company_id = department_update.company_id
     
     db.commit()
     db.refresh(department)
@@ -329,6 +339,36 @@ async def delete_department(department_id: int, db: Session = Depends(get_db)):
     return {"message": "Department deleted successfully"}
 
 # Position Management
+@router.post("/positions", response_model=PositionResponse)
+async def create_position_general(
+    position: PositionCreate, 
+    db: Session = Depends(get_db)
+):
+    """Create a new position with department_id in body"""
+    # Verify department exists
+    department = db.query(Department).filter(Department.id == position.department_id).first()
+    if not department:
+        raise HTTPException(status_code=404, detail="Department not found")
+    
+    # Verify programming language exists if provided
+    if position.programming_language_id:
+        programming_language = db.query(ProgrammingLanguage).filter(
+            ProgrammingLanguage.id == position.programming_language_id
+        ).first()
+        if not programming_language:
+            raise HTTPException(status_code=404, detail="Programming language not found")
+    
+    db_position = Position(
+        name=position.name,
+        description=position.description,
+        department_id=position.department_id,
+        programming_language_id=position.programming_language_id
+    )
+    db.add(db_position)
+    db.commit()
+    db.refresh(db_position)
+    return db_position
+
 @router.post("/departments/{department_id}/positions", response_model=PositionResponse)
 async def create_position(
     department_id: int, 
@@ -624,67 +664,70 @@ async def generate_ai_exam_template(
         
         logger.info(f"📝 N8N payload: {json.dumps(n8n_payload, indent=2)}")
         
-        # Call N8N webhook (use Docker internal networking)
-        n8n_url = "http://host.docker.internal:5678/webhook/generate-exam-v2"
+        # Call N8N webhook - Updated for criteria workflow
+        # Try localhost first, then fallback to Docker internal networking
+        n8n_urls = [
+            "http://localhost:5678/webhook/generate-exam-with-criteria",
+            "http://host.docker.internal:5678/webhook/generate-exam-with-criteria"
+        ]
         
         result = None
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                logger.info(f"📡 Calling N8N workflow: {n8n_url}")
-                n8n_response = await client.post(
-                    n8n_url, 
-                    json=n8n_payload,
-                    headers={"Content-Type": "application/json"}
-                )
-                
-                if n8n_response.status_code == 200:
-                    n8n_result = n8n_response.json()
-                    logger.info(f"✅ N8N workflow response: {json.dumps(n8n_result, indent=2)}")
+        last_error = None
+        
+        # Try each N8N URL until one works
+        for n8n_url in n8n_urls:
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    logger.info(f"📡 Trying N8N workflow: {n8n_url}")
+                    n8n_response = await client.post(
+                        n8n_url, 
+                        json=n8n_payload,
+                        headers={"Content-Type": "application/json"}
+                    )
                     
-                    # Check if N8N workflow was successful
-                    if n8n_result.get("success"):
-                        result = {
-                            "success": True,
-                            "questions": [],  # Will be updated by N8N workflow callback
-                            "ai_metadata": n8n_result.get("ai_metadata", {}),
-                            "processing_time": n8n_result.get("processing_time", 0),
-                            "workflow_version": n8n_result.get("workflow_version", "v2"),
-                            "n8n_response": n8n_result
-                        }
-                        logger.info(f"✅ N8N workflow successful, exam_id: {n8n_result.get('exam_id')}")
+                    if n8n_response.status_code == 200:
+                        n8n_result = n8n_response.json()
+                        logger.info(f"✅ N8N workflow response: {json.dumps(n8n_result, indent=2)}")
+                        
+                        # Check if N8N workflow was successful
+                        if n8n_result.get("success"):
+                            result = {
+                                "success": True,
+                                "questions": [],  # Will be updated by N8N workflow callback
+                                "ai_metadata": n8n_result.get("ai_metadata", {}),
+                                "processing_time": n8n_result.get("processing_time", 0),
+                                "workflow_version": n8n_result.get("workflow_version", "v5-criteria"),
+                                "n8n_response": n8n_result
+                            }
+                            logger.info(f"✅ N8N workflow successful, exam_id: {n8n_result.get('exam_id')}")
+                            break  # Success, exit the loop
+                        else:
+                            logger.error(f"❌ N8N workflow failed: {n8n_result.get('error', 'Unknown error')}")
+                            last_error = f"N8N workflow failed: {n8n_result.get('error', 'Unknown error')}"
                     else:
-                        logger.error(f"❌ N8N workflow failed: {n8n_result.get('error', 'Unknown error')}")
-                        result = {
-                            "success": False,
-                            "error": f"N8N workflow failed: {n8n_result.get('error', 'Unknown error')}",
-                            "raw_response": n8n_result
-                        }
-                else:
-                    logger.error(f"❌ N8N webhook error: {n8n_response.status_code}")
-                    result = {
-                        "success": False,
-                        "error": f"N8N webhook error: {n8n_response.status_code}",
-                        "raw_response": n8n_response.text
-                    }
-                    
-        except httpx.ConnectError as e:
-            logger.error(f"❌ Cannot connect to N8N: {str(e)}")
+                        logger.error(f"❌ N8N webhook error: {n8n_response.status_code}")
+                        last_error = f"N8N webhook error: {n8n_response.status_code} - {n8n_response.text}"
+                        
+            except httpx.ConnectError as e:
+                logger.warning(f"⚠️ Cannot connect to {n8n_url}: {str(e)}")
+                last_error = f"Cannot connect to N8N at {n8n_url}: {str(e)}"
+                continue  # Try next URL
+            except httpx.TimeoutException as e:
+                logger.error(f"❌ N8N workflow timeout at {n8n_url}: {str(e)}")
+                last_error = f"N8N workflow timeout at {n8n_url}: {str(e)}"
+                break  # Don't try other URLs for timeout
+            except Exception as e:
+                logger.error(f"❌ N8N workflow call failed at {n8n_url}: {str(e)}")
+                last_error = f"N8N workflow request failed at {n8n_url}: {str(e)}"
+                continue  # Try next URL
+        
+        # If no URL worked, set the result to failed
+        if not result or not result.get("success"):
             result = {
                 "success": False,
-                "error": f"Cannot connect to N8N workflow at {n8n_url}. Please ensure N8N is running and the workflow is imported and active."
+                "error": last_error or "All N8N endpoints failed"
             }
-        except httpx.TimeoutException as e:
-            logger.error(f"❌ N8N workflow timeout: {str(e)}")
-            result = {
-                "success": False,
-                "error": f"N8N workflow timeout. The AI generation is taking longer than expected."
-            }
-        except Exception as e:
-            logger.error(f"❌ N8N workflow call failed: {str(e)}")
-            result = {
-                "success": False,
-                "error": f"N8N workflow request failed: {str(e)}"
-            }
+
         
         # Check if N8N workflow was successful
         if not result or not result.get("success"):
@@ -1091,6 +1134,136 @@ async def update_exam_with_questions(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to update exam: {str(e)}")
 
+@router.put("/exam-templates/{exam_id}/update-with-criteria-questions")
+async def update_exam_with_criteria_questions(
+    exam_id: int,
+    update_data: Dict,
+    db: Session = Depends(get_db)
+):
+    """Update exam template with AI-generated questions including criteria and points"""
+    try:
+        logger.info(f"🔄 Updating exam ID {exam_id} with criteria-enhanced AI questions")
+        
+        # Verify exam_id matches
+        if update_data.get("exam_id") != exam_id:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Exam ID mismatch: URL has {exam_id}, data has {update_data.get('exam_id')}"
+            )
+        
+        # Find the exam template
+        exam_template = db.query(ExamTemplate).filter(ExamTemplate.id == exam_id).first()
+        if not exam_template:
+            raise HTTPException(status_code=404, detail=f"Exam template with ID {exam_id} not found")
+        
+        # Process questions with criteria and points
+        questions = update_data.get("questions", [])
+        
+        # Validate total points sum to 100
+        total_points = sum(q.get("points", 0) for q in questions)
+        if total_points != 100:
+            logger.warning(f"⚠️ Total points ({total_points}) does not equal 100 for exam {exam_id}")
+        
+        # Enhanced question processing
+        processed_questions = []
+        criteria_stats = {}
+        
+        for q in questions:
+            criteria = q.get("Criteria", "General Knowledge")
+            points = q.get("points", 10)
+            
+            # Track criteria statistics
+            if criteria not in criteria_stats:
+                criteria_stats[criteria] = {"count": 0, "total_points": 0}
+            criteria_stats[criteria]["count"] += 1
+            criteria_stats[criteria]["total_points"] += points
+            
+            question_dict = {
+                "id": q.get("id", len(processed_questions) + 1),
+                "type": q.get("type"),
+                "question": q.get("question"),
+                "Criteria": criteria,
+                "points": points,
+                "score": points  # Backward compatibility
+            }
+            
+            if q.get("type") == "multiple_choice":
+                question_dict.update({
+                    "options": q.get("options", []),
+                    "correct_answer": q.get("correct_answer"),
+                    "explanation": q.get("explanation")
+                })
+            elif q.get("type") == "coding":
+                question_dict.update({
+                    "description": q.get("description"),
+                    "sample_input": q.get("sample_input"),
+                    "sample_output": q.get("sample_output"),
+                    "expected_output": q.get("expected_output")
+                })
+            
+            processed_questions.append(question_dict)
+        
+        # Update exam template
+        exam_template.questions = processed_questions
+        
+        # Update metadata with criteria analysis
+        existing_metadata = exam_template.exam_metadata or {}
+        enhanced_metadata = existing_metadata.copy()
+        enhanced_metadata.update({
+            "criteria_analysis": {
+                "unique_criteria": list(criteria_stats.keys()),
+                "criteria_distribution": criteria_stats,
+                "total_points": total_points,
+                "questions_count": len(processed_questions)
+            },
+            "ai_generation": update_data.get("metadata", {}).get("ai_generation", {}),
+            "last_updated": datetime.utcnow().isoformat()
+        })
+        exam_template.exam_metadata = enhanced_metadata
+        
+        # Update timestamp
+        exam_template.updated_at = datetime.utcnow()
+        
+        db.commit()
+        db.refresh(exam_template)
+        
+        logger.info(f"✅ Exam ID {exam_id} updated with {len(processed_questions)} criteria-enhanced questions")
+        
+        return {
+            "success": True,
+            "id": exam_template.id,
+            "name": exam_template.name,
+            "description": exam_template.description,
+            "programming_language": exam_template.programming_language,
+            "duration_minutes": exam_template.duration_minutes,
+            "questions": exam_template.questions,
+            "metadata": exam_template.exam_metadata,
+            "scoring_summary": {
+                "total_points": total_points,
+                "questions_count": len(processed_questions),
+                "criteria_count": len(criteria_stats),
+                "point_distribution": [
+                    {
+                        "question": q["question"][:50] + "..." if len(q["question"]) > 50 else q["question"],
+                        "criteria": q["Criteria"],
+                        "type": q["type"],
+                        "points": q["points"]
+                    } for q in processed_questions
+                ]
+            },
+            "criteria_analysis": criteria_stats,
+            "is_active": exam_template.is_active,
+            "created_at": exam_template.created_at.isoformat(),
+            "updated_at": exam_template.updated_at.isoformat() if exam_template.updated_at else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error updating exam ID {exam_id} with criteria: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update exam with criteria: {str(e)}")
+
 @router.post("/exam-templates/save-ai-generated")
 async def save_ai_generated_exam(
     request_data: Dict,
@@ -1153,14 +1326,16 @@ async def save_ai_generated_exam(
             db.commit()
             db.refresh(position)
         
-        # Convert exam questions to database format
+        # Convert exam questions to database format with new Criteria and points fields
         questions_json = []
         for q in exam_data["questions"]:
             question_dict = {
                 "id": q.get("id"),
                 "type": q.get("type"),
                 "question": q.get("question"),
-                "score": q.get("score", 10)
+                "Criteria": q.get("Criteria", "General Knowledge"),  # AI-generated criteria
+                "points": q.get("points", q.get("score", 10)),  # Use points or fallback to score
+                "score": q.get("score", q.get("points", 10))  # Backward compatibility
             }
             
             if q.get("type") == "multiple_choice":
@@ -1173,7 +1348,8 @@ async def save_ai_generated_exam(
                 question_dict.update({
                     "description": q.get("description"),
                     "sample_input": q.get("sample_input"),
-                    "sample_output": q.get("sample_output")
+                    "sample_output": q.get("sample_output"),
+                    "expected_output": q.get("expected_output")
                 })
             
             questions_json.append(question_dict)

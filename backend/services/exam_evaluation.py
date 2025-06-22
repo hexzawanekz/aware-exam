@@ -126,39 +126,95 @@ class ExamEvaluationService:
             }
     
     def _calculate_basic_score(self, session: ExamSession) -> Dict[str, Any]:
-        """Calculate basic score from answers"""
+        """Calculate basic score from answers using new points-based system"""
         if not session.randomized_questions or not session.answers:
-            return {"total_score": 0, "max_score": 0, "percentage_score": 0}
+            return {"total_score": 0, "max_score": 0, "percentage_score": 0, "criteria_breakdown": {}}
         
         questions = session.randomized_questions
         answers = session.answers
         
         total_score = 0
         max_score = 0
+        criteria_breakdown = {}
+        detailed_results = []
         
         for question in questions:
             question_id = str(question.get("id", ""))
             user_answer = answers.get(question_id)
-            question_score = question.get("score", 10)
-            max_score += question_score
+            
+            # Use new points system or fallback to score
+            question_points = question.get("points", question.get("score", 10))
+            max_score += question_points
+            
+            # Track criteria performance
+            criteria = question.get("Criteria", "General Knowledge")
+            if criteria not in criteria_breakdown:
+                criteria_breakdown[criteria] = {
+                    "total_points": 0,
+                    "earned_points": 0,
+                    "questions_count": 0,
+                    "correct_count": 0
+                }
+            
+            criteria_breakdown[criteria]["total_points"] += question_points
+            criteria_breakdown[criteria]["questions_count"] += 1
+            
+            question_score = 0
+            is_correct = False
             
             if question.get("type") == "multiple_choice":
                 if user_answer and user_answer == question.get("correct_answer"):
-                    total_score += question_score
+                    question_score = question_points
+                    is_correct = True
+                    criteria_breakdown[criteria]["correct_count"] += 1
             elif question.get("type") in ["code", "coding"]:
-                # Basic code evaluation - give partial credit for attempts
+                # Enhanced code evaluation with partial credit
                 if user_answer and len(str(user_answer).strip()) > 10:
-                    if len(str(user_answer)) > 50:
-                        total_score += int(question_score * 0.7)
-                    else:
-                        total_score += int(question_score * 0.3)
+                    answer_length = len(str(user_answer).strip())
+                    # More sophisticated scoring based on answer complexity
+                    if answer_length > 100:  # Substantial attempt
+                        question_score = int(question_points * 0.8)
+                        is_correct = True
+                    elif answer_length > 50:  # Moderate attempt
+                        question_score = int(question_points * 0.6)
+                    elif answer_length > 20:  # Basic attempt
+                        question_score = int(question_points * 0.4)
+                    else:  # Minimal attempt
+                        question_score = int(question_points * 0.2)
+                    
+                    if question_score >= question_points * 0.7:
+                        criteria_breakdown[criteria]["correct_count"] += 1
+            
+            total_score += question_score
+            criteria_breakdown[criteria]["earned_points"] += question_score
+            
+            # Store detailed result for each question
+            detailed_results.append({
+                "id": question_id,
+                "question": question.get("question", "")[:100] + "...",
+                "type": question.get("type"),
+                "criteria": criteria,
+                "max_points": question_points,
+                "earned_points": question_score,
+                "is_correct": is_correct,
+                "user_answer": str(user_answer)[:100] + "..." if user_answer else None
+            })
+        
+        # Calculate percentage for each criteria
+        for criteria in criteria_breakdown:
+            total_pts = criteria_breakdown[criteria]["total_points"]
+            earned_pts = criteria_breakdown[criteria]["earned_points"]
+            criteria_breakdown[criteria]["percentage"] = int((earned_pts / total_pts) * 100) if total_pts > 0 else 0
         
         percentage_score = int((total_score / max_score) * 100) if max_score > 0 else 0
         
         return {
             "total_score": total_score,
             "max_score": max_score,
-            "percentage_score": percentage_score
+            "percentage_score": percentage_score,
+            "criteria_breakdown": criteria_breakdown,
+            "detailed_results": detailed_results,
+            "scoring_method": "points_based"
         }
     
     async def _analyze_proctoring_events(self, session: ExamSession, db: Session) -> Dict[str, Any]:

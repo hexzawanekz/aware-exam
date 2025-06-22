@@ -11,6 +11,19 @@ import ExamInterface from "./components/ExamInterface";
 import DebugMonitoring from "./components/DebugMonitoring";
 import CandidateLogin from "./components/CandidateLogin";
 import CandidateDashboard from "./components/CandidateDashboard";
+import Header from "./components/Header";
+import Sidebar from "./components/Sidebar";
+import DashboardLayout from "./components/DashboardLayout";
+import AdminLayout from "./components/AdminLayout";
+import AdminDashboard from "./components/AdminDashboard";
+import AdminCompanies from "./components/AdminCompanies";
+import AdminDepartments from "./components/AdminDepartments";
+import AdminPositions from "./components/AdminPositions";
+import AdminProgrammingLanguages from "./components/AdminProgrammingLanguages";
+import AdminExams from "./components/AdminExams";
+import AdminExamDetail from "./components/AdminExamDetail";
+import AdminCandidates from "./components/AdminCandidates";
+import AdminCandidateDetail from "./components/AdminCandidateDetail";
 import "./i18n/config";
 
 // Landing Page Component
@@ -605,9 +618,7 @@ function DepartmentPositions({ departmentId }) {
   useEffect(() => {
     const loadPositions = async () => {
       try {
-        const response = await apiService.request(
-          `/admin/departments/${departmentId}/positions`
-        );
+        const response = await apiService.getPositions(departmentId);
         setPositions(response || []);
       } catch (error) {
         console.error("Failed to load department positions:", error);
@@ -742,13 +753,11 @@ function DepartmentsPage() {
       for (const positionId of positionIds) {
         const position = allPositions.find((p) => p.id === positionId);
         if (position) {
-          await apiService.request(`/admin/positions/${positionId}`, {
-            method: "PUT",
-            body: JSON.stringify({
-              name: position.name,
-              description: position.description,
-              department_id: departmentId,
-            }),
+          await apiService.updatePosition(positionId, {
+            name: position.name,
+            description: position.description,
+            department_id: departmentId,
+            programming_language_id: position.programming_language_id || null,
           });
         }
       }
@@ -768,15 +777,12 @@ function DepartmentsPage() {
       if (editingDepartment) {
         // Update existing department
         console.log("💾 Updating department in database:", formData);
-        const response = await apiService.request(
-          `/admin/departments/${editingDepartment.id}`,
+        const response = await apiService.updateDepartment(
+          editingDepartment.id,
           {
-            method: "PUT",
-            body: JSON.stringify({
-              name: formData.name,
-              description: formData.description,
-              company_id: parseInt(formData.company_id),
-            }),
+            name: formData.name,
+            description: formData.description,
+            company_id: parseInt(formData.company_id),
           }
         );
 
@@ -792,15 +798,12 @@ function DepartmentsPage() {
       } else {
         // Create new department
         console.log("💾 Saving department to database:", formData);
-        const response = await apiService.request(
-          `/admin/companies/${formData.company_id}/departments`,
+        const response = await apiService.createDepartment(
+          parseInt(formData.company_id),
           {
-            method: "POST",
-            body: JSON.stringify({
-              name: formData.name,
-              description: formData.description,
-              company_id: parseInt(formData.company_id),
-            }),
+            name: formData.name,
+            description: formData.description,
+            company_id: parseInt(formData.company_id),
           }
         );
 
@@ -844,9 +847,7 @@ function DepartmentsPage() {
     let existingPositionIds = [];
     try {
       console.log("🔍 Loading positions for department:", department.id);
-      const response = await apiService.request(
-        `/admin/departments/${department.id}/positions`
-      );
+      const response = await apiService.getPositions(department.id);
       existingPositionIds = response.map((pos) => pos.id);
       console.log("✅ Existing positions loaded:", existingPositionIds);
     } catch (error) {
@@ -882,9 +883,7 @@ function DepartmentsPage() {
 
     try {
       console.log("🗑️ Deleting department:", departmentId);
-      await apiService.request(`/admin/departments/${departmentId}`, {
-        method: "DELETE",
-      });
+      await apiService.deleteDepartment(departmentId);
 
       console.log("✅ Department deleted");
       alert("ลบแผนกเรียบร้อยแล้ว");
@@ -1333,38 +1332,29 @@ function PositionsPage() {
       if (editingPosition) {
         // Update existing position
         console.log("💾 Updating position in database:", formData);
-        const response = await apiService.request(
-          `/admin/positions/${editingPosition.id}`,
-          {
-            method: "PUT",
-            body: JSON.stringify({
-              name: formData.name,
-              description: formData.description,
-              department_id: parseInt(formData.department_id),
-              programming_language_id: formData.programming_language_id
-                ? parseInt(formData.programming_language_id)
-                : null,
-            }),
-          }
-        );
+        const response = await apiService.updatePosition(editingPosition.id, {
+          name: formData.name,
+          description: formData.description,
+          department_id: parseInt(formData.department_id),
+          programming_language_id: formData.programming_language_id
+            ? parseInt(formData.programming_language_id)
+            : null,
+        });
 
         console.log("✅ Position updated:", response);
         alert("แก้ไขตำแหน่งเรียบร้อยแล้ว");
       } else {
         // Create new position
         console.log("💾 Saving position to database:", formData);
-        const response = await apiService.request(
-          `/admin/departments/${formData.department_id}/positions`,
+        const response = await apiService.createPosition(
+          parseInt(formData.department_id),
           {
-            method: "POST",
-            body: JSON.stringify({
-              name: formData.name,
-              description: formData.description,
-              department_id: parseInt(formData.department_id),
-              programming_language_id: formData.programming_language_id
-                ? parseInt(formData.programming_language_id)
-                : null,
-            }),
+            name: formData.name,
+            description: formData.description,
+            department_id: parseInt(formData.department_id),
+            programming_language_id: formData.programming_language_id
+              ? parseInt(formData.programming_language_id)
+              : null,
           }
         );
 
@@ -1426,9 +1416,7 @@ function PositionsPage() {
 
     try {
       console.log("🗑️ Deleting position:", positionId);
-      await apiService.request(`/admin/positions/${positionId}`, {
-        method: "DELETE",
-      });
+      await apiService.deletePosition(positionId);
 
       console.log("✅ Position deleted");
       alert("ลบตำแหน่งเรียบร้อยแล้ว");
@@ -1832,16 +1820,13 @@ function ProgrammingLanguagesPage() {
       if (editingLanguage) {
         // Update existing programming language
         console.log("💾 Updating programming language in database:", formData);
-        const response = await apiService.request(
-          `/admin/programming-languages/${editingLanguage.id}`,
+        const response = await apiService.updateProgrammingLanguage(
+          editingLanguage.id,
           {
-            method: "PUT",
-            body: JSON.stringify({
-              name: formData.name,
-              description: formData.description,
-              version: formData.version,
-              is_active: formData.is_active,
-            }),
+            name: formData.name,
+            description: formData.description,
+            version: formData.version,
+            is_active: formData.is_active,
           }
         );
 
@@ -1850,18 +1835,12 @@ function ProgrammingLanguagesPage() {
       } else {
         // Create new programming language
         console.log("💾 Saving programming language to database:", formData);
-        const response = await apiService.request(
-          "/admin/programming-languages",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              name: formData.name,
-              description: formData.description,
-              version: formData.version,
-              is_active: formData.is_active,
-            }),
-          }
-        );
+        const response = await apiService.createProgrammingLanguage({
+          name: formData.name,
+          description: formData.description,
+          version: formData.version,
+          is_active: formData.is_active,
+        });
 
         console.log("✅ Programming language created:", response);
         alert("เพิ่มภาษาโปรแกรมมิ่งเรียบร้อยแล้ว");
@@ -1916,9 +1895,7 @@ function ProgrammingLanguagesPage() {
 
     try {
       console.log("🗑️ Deleting programming language:", languageId);
-      await apiService.request(`/admin/programming-languages/${languageId}`, {
-        method: "DELETE",
-      });
+      await apiService.deleteProgrammingLanguage(languageId);
 
       console.log("✅ Programming language deleted");
       alert("ลบภาษาโปรแกรมมิ่งเรียบร้อยแล้ว");
@@ -3206,23 +3183,54 @@ function ExamsPage() {
                         }}
                       >
                         <h4>Question {index + 1}</h4>
-                        <span
+                        <div
                           style={{
-                            backgroundColor:
-                              question.type === "multiple_choice"
-                                ? "#4caf50"
-                                : "#ff9800",
-                            color: "white",
-                            padding: "4px 8px",
-                            borderRadius: "4px",
-                            fontSize: "12px",
+                            display: "flex",
+                            gap: "8px",
+                            alignItems: "center",
                           }}
                         >
-                          {question.type === "multiple_choice"
-                            ? "Multiple Choice"
-                            : "Coding"}{" "}
-                          ({question.score || 10} pts)
-                        </span>
+                          <span
+                            style={{
+                              backgroundColor:
+                                question.type === "multiple_choice"
+                                  ? "#4caf50"
+                                  : "#ff9800",
+                              color: "white",
+                              padding: "4px 8px",
+                              borderRadius: "4px",
+                              fontSize: "12px",
+                            }}
+                          >
+                            {question.type === "multiple_choice"
+                              ? "Multiple Choice"
+                              : "Coding"}
+                          </span>
+                          <span
+                            style={{
+                              backgroundColor: "#2196f3",
+                              color: "white",
+                              padding: "4px 8px",
+                              borderRadius: "4px",
+                              fontSize: "12px",
+                            }}
+                          >
+                            {question.points || question.score || 10} pts
+                          </span>
+                          {question.Criteria && (
+                            <span
+                              style={{
+                                backgroundColor: "#4caf50",
+                                color: "white",
+                                padding: "4px 8px",
+                                borderRadius: "4px",
+                                fontSize: "11px",
+                              }}
+                            >
+                              🎯 {question.Criteria}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <p>
@@ -4609,248 +4617,104 @@ function CandidateDetailPage() {
 // User Exam Page - Load available exams from database
 function ExamPage() {
   const navigate = useNavigate();
-  const [availableExams, setAvailableExams] = useState([]);
+  const [candidate, setCandidate] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [creatingSession, setCreatingSession] = useState(null);
 
-  // Load available exams from database
+  // Check for existing candidate session
   useEffect(() => {
-    const loadAvailableExams = async () => {
+    const savedSession = localStorage.getItem("candidateSession");
+    if (savedSession) {
       try {
-        setLoading(true);
-        console.log("🔍 Loading available exams from database...");
-        const response = await apiService.getExamTemplates();
-        console.log("✅ Available exams loaded:", response);
-
-        // Filter only active exams
-        const activeExams =
-          response?.filter((exam) => exam.is_active !== false) || [];
-        setAvailableExams(activeExams);
-
-        console.log(
-          `📋 Found ${activeExams.length} active exams available for users`
-        );
-      } catch (error) {
-        console.error("❌ Failed to load available exams:", error);
-        // Fallback to empty array - show message to user
-        setAvailableExams([]);
-      } finally {
-        setLoading(false);
+        const candidateData = JSON.parse(savedSession);
+        setCandidate(candidateData);
+      } catch (err) {
+        console.error("Error parsing saved session:", err);
+        localStorage.removeItem("candidateSession");
       }
-    };
-
-    loadAvailableExams();
+    }
+    setLoading(false);
   }, []);
 
-  // Create exam session and start exam
+  const handleLogout = () => {
+    localStorage.removeItem("candidateSession");
+    setCandidate(null);
+    navigate("/");
+  };
+
   const handleStartExam = async (exam) => {
     try {
-      console.log(
-        "🚀 Creating exam session for authenticated candidate:",
-        exam
-      );
+      console.log("Starting exam:", exam);
 
-      // Create a new exam session for this authenticated candidate
+      // Create exam session for this candidate
       const sessionData = {
         candidate_id: candidate.id,
+        template_id: exam.template_id,
+        status: "in_progress",
       };
 
-      const response = await api.request(
-        `/api/v1/exam/exam-templates/${exam.template_id}/sessions`,
+      // Call API to create/start exam session
+      const response = await apiService.request(
+        "/api/v1/candidate/start-exam",
         {
           method: "POST",
           body: JSON.stringify(sessionData),
         }
       );
 
-      console.log("✅ Exam session created:", response);
-
-      // Navigate to the exam interface with the new session ID
-      navigate(`/exam/${response.session.session_id}`);
+      if (response.session_id) {
+        // Navigate to exam interface with session ID
+        navigate(`/exam/${response.session_id}`);
+      } else {
+        // Fallback: use existing session_id from exam data
+        navigate(`/exam/${exam.session_id}`);
+      }
     } catch (error) {
-      console.error("❌ Failed to create exam session:", error);
-      alert(
-        `ไม่สามารถเริ่มการสอบได้: ${error.message || "กรุณาลองใหม่อีกครั้ง"}`
-      );
+      console.error("Error starting exam:", error);
+      // Fallback navigation if API fails
+      navigate(`/exam/${exam.session_id || 1}`);
     }
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray dark:bg-boxdark-2 flex items-center justify-center">
+        <div className="text-center">
+          <div className="h-16 w-16 animate-spin rounded-full border-4 border-solid border-primary border-t-transparent mx-auto"></div>
+          <p className="mt-4 text-black dark:text-white">กำลังโหลด...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show candidate dashboard if logged in, otherwise redirect to login
+  if (candidate) {
+    return (
+      <DashboardLayout user={candidate} onLogout={handleLogout}>
+        <CandidateDashboard
+          candidate={candidate}
+          onLogout={handleLogout}
+          onStartExam={handleStartExam}
+        />
+      </DashboardLayout>
+    );
+  }
+
+  // Redirect to candidate login if not authenticated
   return (
-    <div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
-      <h1>📝 หน้าทำการสอบ</h1>
-      <p>ยินดีต้อนรับสู่ระบบสอบออนไลน์</p>
-
-      <div
-        style={{
-          marginTop: "30px",
-          padding: "20px",
-          backgroundColor: "#e3f2fd",
-          borderRadius: "8px",
-        }}
-      >
-        <h3>📋 ข้อสอบที่พร้อมทำ</h3>
-
-        {loading ? (
-          <div style={{ textAlign: "center", padding: "20px" }}>
-            <p>🔄 กำลังโหลดข้อสอบจากฐานข้อมูล...</p>
-          </div>
-        ) : availableExams.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "20px" }}>
-            <p>❌ ไม่พบข้อสอบที่พร้อมใช้งาน</p>
-            <p style={{ color: "#666", fontSize: "14px" }}>
-              กรุณาติดต่อผู้ดูแลระบบเพื่อสร้างข้อสอบ
-            </p>
-          </div>
-        ) : (
-          availableExams.map((exam) => (
-            <div
-              key={exam.id}
-              style={{
-                backgroundColor: "white",
-                padding: "20px",
-                marginBottom: "15px",
-                borderRadius: "8px",
-                border: "1px solid #ddd",
-                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                }}
-              >
-                <div style={{ flex: 1 }}>
-                  <h4 style={{ margin: "0 0 8px 0", color: "#1976d2" }}>
-                    📝 {exam.name}
-                  </h4>
-                  {exam.description && (
-                    <p
-                      style={{
-                        margin: "0 0 8px 0",
-                        color: "#666",
-                        fontSize: "14px",
-                      }}
-                    >
-                      {exam.description}
-                    </p>
-                  )}
-
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "15px",
-                      marginBottom: "10px",
-                    }}
-                  >
-                    <span style={{ fontSize: "14px", color: "#666" }}>
-                      ⏱️ เวลา: <strong>{exam.duration_minutes}</strong> นาที
-                    </span>
-                    <span style={{ fontSize: "14px", color: "#666" }}>
-                      📊 จำนวนข้อ: <strong>{exam.questions_count}</strong> ข้อ
-                    </span>
-                    {exam.programming_language && (
-                      <span
-                        style={{
-                          backgroundColor: "#e3f2fd",
-                          color: "#1976d2",
-                          padding: "2px 8px",
-                          borderRadius: "12px",
-                          fontSize: "12px",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        💻 {exam.programming_language}
-                      </span>
-                    )}
-                  </div>
-
-                  {exam.position && (
-                    <div style={{ fontSize: "13px", color: "#999" }}>
-                      🏢 {exam.position.company_name} -{" "}
-                      {exam.position.department_name} - {exam.position.name}
-                    </div>
-                  )}
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "8px",
-                    marginLeft: "20px",
-                  }}
-                >
-                  <button
-                    style={{
-                      padding: "12px 24px",
-                      backgroundColor:
-                        creatingSession === exam.id ? "#ccc" : "#4caf50",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor:
-                        creatingSession === exam.id ? "not-allowed" : "pointer",
-                      fontSize: "14px",
-                      fontWeight: "bold",
-                      minWidth: "160px",
-                    }}
-                    onClick={() => handleStartExam(exam)}
-                    disabled={creatingSession === exam.id}
-                  >
-                    {creatingSession === exam.id
-                      ? "🔄 กำลังเตรียม..."
-                      : "🚀 เริ่มทำการสอบ"}
-                  </button>
-
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      color: "#666",
-                      textAlign: "center",
-                    }}
-                  >
-                    🤖 AI ตรวจจับการโกง
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      <div
-        style={{
-          marginTop: "30px",
-          padding: "20px",
-          backgroundColor: "#fff3e0",
-          borderRadius: "8px",
-        }}
-      >
-        <h3>⚠️ ข้อปฏิบัติในการสอบ</h3>
-        <ul style={{ textAlign: "left" }}>
-          <li>ห้ามออกจากหน้าจอระหว่างทำการสอบ</li>
-          <li>ระบบจะตรวจจับใบหน้าตลอดเวลา</li>
-          <li>ห้ามใช้เครื่องมือช่วยเหลือภายนอก</li>
-          <li>กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต</li>
-        </ul>
-      </div>
-
-      <div style={{ marginTop: "30px", textAlign: "center" }}>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center bg-white p-8 rounded-lg shadow-lg max-w-md w-full mx-4">
+        <div className="text-6xl mb-4">🔒</div>
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">
+          ต้องเข้าสู่ระบบก่อนทำการสอบ
+        </h2>
+        <p className="text-gray-600 mb-6">
+          กรุณาเข้าสู่ระบบเพื่อดูข้อสอบที่ได้รับมอบหมาย
+        </p>
         <button
-          style={{
-            padding: "15px 30px",
-            backgroundColor: "#666",
-            color: "white",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-            fontSize: "16px",
-          }}
-          onClick={() => navigate("/")}
+          onClick={() => navigate("/candidate-login")}
+          className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all duration-200 transform hover:scale-105"
         >
-          ← กลับหน้าหลัก
+          เข้าสู่ระบบ
         </button>
       </div>
     </div>
@@ -4955,6 +4819,8 @@ function CandidatePortal() {
 
   const handleLoginSuccess = (candidateData) => {
     setCandidate(candidateData);
+    // Redirect to /exam after successful login
+    navigate("/exam");
   };
 
   const handleLogout = () => {
@@ -4966,12 +4832,38 @@ function CandidatePortal() {
     navigate("/");
   };
 
-  const handleStartExam = (exam) => {
-    // Navigate to exam interface with exam data
-    // This can be enhanced to start the actual exam session
-    console.log("Starting exam:", exam);
-    // For now, just alert - you can implement actual exam starting logic
-    alert(`กำลังเริ่มข้อสอบ: ${exam.name}`);
+  const handleStartExam = async (exam) => {
+    try {
+      console.log("Starting exam:", exam);
+
+      // Create exam session for this candidate
+      const sessionData = {
+        candidate_id: candidate.id,
+        template_id: exam.template_id,
+        status: "in_progress",
+      };
+
+      // Call API to create/start exam session
+      const response = await apiService.request(
+        "/api/v1/candidate/start-exam",
+        {
+          method: "POST",
+          body: JSON.stringify(sessionData),
+        }
+      );
+
+      if (response.session_id) {
+        // Navigate to exam interface with session ID
+        navigate(`/exam/${response.session_id}`);
+      } else {
+        // Fallback: use existing session_id from exam data
+        navigate(`/exam/${exam.session_id}`);
+      }
+    } catch (error) {
+      console.error("Error starting exam:", error);
+      // Fallback navigation if API fails
+      navigate(`/exam/${exam.session_id || 1}`);
+    }
   };
 
   if (loading) {
@@ -5015,17 +4907,78 @@ function App() {
     >
       <Routes>
         <Route path="/" element={<LandingPage />} />
-        <Route path="/admin" element={<AdminPage />} />
-        <Route path="/admin/companies" element={<CompaniesPage />} />
-        <Route path="/admin/departments" element={<DepartmentsPage />} />
-        <Route path="/admin/positions" element={<PositionsPage />} />
+        <Route
+          path="/admin"
+          element={
+            <AdminLayout>
+              <AdminDashboard />
+            </AdminLayout>
+          }
+        />
+        <Route
+          path="/admin/companies"
+          element={
+            <AdminLayout>
+              <AdminCompanies />
+            </AdminLayout>
+          }
+        />
+        <Route
+          path="/admin/departments"
+          element={
+            <AdminLayout>
+              <AdminDepartments />
+            </AdminLayout>
+          }
+        />
+        <Route
+          path="/admin/positions"
+          element={
+            <AdminLayout>
+              <AdminPositions />
+            </AdminLayout>
+          }
+        />
         <Route
           path="/admin/programming-languages"
-          element={<ProgrammingLanguagesPage />}
+          element={
+            <AdminLayout>
+              <AdminProgrammingLanguages />
+            </AdminLayout>
+          }
         />
-        <Route path="/admin/exams" element={<ExamsPage />} />
-        <Route path="/admin/candidates" element={<CandidatesPage />} />
-        <Route path="/admin/candidates/:id" element={<CandidateDetailPage />} />
+        <Route
+          path="/admin/exams"
+          element={
+            <AdminLayout>
+              <AdminExams />
+            </AdminLayout>
+          }
+        />
+        <Route
+          path="/admin/exams/:id"
+          element={
+            <AdminLayout>
+              <AdminExamDetail />
+            </AdminLayout>
+          }
+        />
+        <Route
+          path="/admin/candidates"
+          element={
+            <AdminLayout>
+              <AdminCandidates />
+            </AdminLayout>
+          }
+        />
+        <Route
+          path="/admin/candidates/:id"
+          element={
+            <AdminLayout>
+              <AdminCandidateDetail />
+            </AdminLayout>
+          }
+        />
         <Route path="/candidate-login" element={<CandidatePortal />} />
         <Route path="/exam" element={<ExamPage />} />
         <Route path="/exam/:sessionId" element={<ExamInterface />} />

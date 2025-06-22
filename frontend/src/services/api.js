@@ -151,8 +151,8 @@ class ApiService {
     return this.request(endpoint);
   }
 
-  async createPosition(departmentId, positionData) {
-    return this.request(`/api/v1/admin/departments/${departmentId}/positions`, {
+  async createPosition(positionData) {
+    return this.request(`/api/v1/admin/positions`, {
       method: "POST",
       body: JSON.stringify(positionData),
     });
