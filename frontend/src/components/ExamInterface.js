@@ -90,6 +90,23 @@ const ExamInterface = () => {
   const [saveTimeouts, setSaveTimeouts] = useState({});
   const [webcamReady, setWebcamReady] = useState(false);
 
+  // Cheat warning modal states
+  const [showCheatWarning, setShowCheatWarning] = useState(false);
+  const [cheatWarningData, setCheatWarningData] = useState({
+    type: "",
+    message: "",
+    count: 0,
+  });
+
+  // Warning tracker popup modal states
+  const [showWarningTracker, setShowWarningTracker] = useState(false);
+  const [suspiciousActivityTracker, setSuspiciousActivityTracker] = useState({
+    head_turned_away: { startTime: null, duration: 0, warningCount: 0 },
+    head_down_detected: { startTime: null, duration: 0, warningCount: 0 },
+    mobile_phone_detected: { startTime: null, duration: 0, warningCount: 0 },
+    looking_away_detected: { startTime: null, duration: 0, warningCount: 0 },
+  });
+
   // Timer setup - calculate expiry based on exam status
   // State for timer expiry timestamp
   const [timerExpiryTimestamp, setTimerExpiryTimestamp] = useState(
@@ -1041,6 +1058,17 @@ const ExamInterface = () => {
               );
             }
 
+            // Track suspicious activities for warning modal
+            if (
+              result.suspicious_activity &&
+              result.suspicious_activity.length > 0
+            ) {
+              trackSuspiciousActivities(result.suspicious_activity);
+            } else {
+              // Reset all activity trackers when no suspicious activity
+              resetAllActivityTrackers();
+            }
+
             // Log suspicious activities - Enhanced for both systems
             if (
               result.suspicious_activity &&
@@ -1156,6 +1184,136 @@ const ExamInterface = () => {
     }
   }, [webcamReady, sessionId, examData]);
 
+  // Functions for tracking suspicious activities
+  const trackSuspiciousActivities = (activities) => {
+    const currentTime = Date.now();
+    const WARNING_THRESHOLD = 5000; // 5 seconds in milliseconds
+
+    // Show warning tracker modal when activities are detected
+    setShowWarningTracker(true);
+
+    setSuspiciousActivityTracker((prev) => {
+      const newTracker = { ...prev };
+
+      // Define activity mappings
+      const activityMap = {
+        head_turned_away: "head_turned_away",
+        head_down_detected: "head_down_detected",
+        mobile_phone_detected: "mobile_phone_detected",
+        looking_away_detected: "looking_away_detected",
+        prolonged_absence_detected: "looking_away_detected",
+        attention_diverted: "looking_away_detected",
+      };
+
+      // Track each detected activity
+      activities.forEach((activity) => {
+        const mappedActivity = activityMap[activity] || activity;
+
+        if (newTracker[mappedActivity]) {
+          if (!newTracker[mappedActivity].startTime) {
+            // Start tracking this activity
+            newTracker[mappedActivity].startTime = currentTime;
+            newTracker[mappedActivity].duration = 0;
+          } else {
+            // Update duration
+            newTracker[mappedActivity].duration =
+              currentTime - newTracker[mappedActivity].startTime;
+
+            // Check if warning threshold is exceeded
+            if (newTracker[mappedActivity].duration >= WARNING_THRESHOLD) {
+              // Show warning if this is a new warning or enough time has passed since last warning
+              const timeSinceLastWarning =
+                currentTime - (newTracker[mappedActivity].lastWarningTime || 0);
+              if (
+                !newTracker[mappedActivity].lastWarningTime ||
+                timeSinceLastWarning >= 10000
+              ) {
+                // 10 seconds between warnings
+                showCheatWarningModal(
+                  mappedActivity,
+                  newTracker[mappedActivity].warningCount + 1
+                );
+                newTracker[mappedActivity].warningCount += 1;
+                newTracker[mappedActivity].lastWarningTime = currentTime;
+              }
+            }
+          }
+        }
+      });
+
+      // Reset activities that are no longer detected
+      Object.keys(newTracker).forEach((activityKey) => {
+        const isStillActive = activities.some((activity) => {
+          const mappedActivity = activityMap[activity] || activity;
+          return mappedActivity === activityKey;
+        });
+
+        if (!isStillActive && newTracker[activityKey].startTime) {
+          newTracker[activityKey].startTime = null;
+          newTracker[activityKey].duration = 0;
+        }
+      });
+
+      return newTracker;
+    });
+  };
+
+  const resetAllActivityTrackers = () => {
+    // Hide warning tracker modal with a short delay when no activities are detected
+    setTimeout(() => {
+      setShowWarningTracker(false);
+    }, 2000); // 2 seconds delay to allow user to see the "no suspicious activity" message
+
+    setSuspiciousActivityTracker((prev) => {
+      const newTracker = { ...prev };
+      Object.keys(newTracker).forEach((key) => {
+        newTracker[key].startTime = null;
+        newTracker[key].duration = 0;
+      });
+      return newTracker;
+    });
+  };
+
+  const showCheatWarningModal = (activityType, warningCount) => {
+    // Don't show warning if modal is already open
+    if (showCheatWarning) return;
+
+    let message = "";
+    switch (activityType) {
+      case "head_turned_away":
+        message = t("cheat_warning.head_turned_message");
+        break;
+      case "head_down_detected":
+        message = t("cheat_warning.head_down_message");
+        break;
+      case "mobile_phone_detected":
+        message = t("cheat_warning.mobile_detected_message");
+        break;
+      case "looking_away_detected":
+        message = t("cheat_warning.looking_away_message");
+        break;
+      default:
+        message = t("cheat_warning.multiple_violations_message");
+    }
+
+    setCheatWarningData({
+      type: activityType,
+      message: message,
+      count: warningCount,
+    });
+
+    setShowCheatWarning(true);
+
+    // Auto-close after 10 seconds if user doesn't interact
+    setTimeout(() => {
+      setShowCheatWarning(false);
+    }, 10000);
+  };
+
+  const handleCheatWarningResponse = () => {
+    setShowCheatWarning(false);
+  };
+
   const handleStartExam = async () => {
     try {
       // Enable fullscreen
@@ -1191,6 +1349,32 @@ const ExamInterface = () => {
   };
 
   const handleAnswerChange = async (questionId, answer) => {
+    // Prevent answer changes if exam is already finished/submitted
+    const finalStates = [
+      "completed",
+      "submitted",
+      "finished",
+      "passed",
+      "failed",
+      "cancelled",
+    ];
+    if (examData && finalStates.includes(examData.status?.toLowerCase())) {
+      console.warn(
+        `⚠️ Cannot modify answers - exam already in final state: ${examData.status}`
+      );
+      alert(
+        `การสอบนี้ได้สิ้นสุดแล้ว (สถานะ: ${examData.status})\nไม่สามารถแก้ไขคำตอบได้`
+      );
+      return;
+    }
+
+    // Prevent answer changes if exam hasn't started
+    if (examData && examData.status === "waiting") {
+      console.warn("⚠️ Cannot modify answers - exam hasn't started yet");
+      alert("การสอบยังไม่ได้เริ่มต้น กรุณาเริ่มการสอบก่อน");
+      return;
+    }
+
     // Update local state immediately
     setAnswers((prev) => ({
       ...prev,
@@ -1260,14 +1444,21 @@ const ExamInterface = () => {
     // Auto-save to backend if exam has started
     if (examStarted && sessionId) {
       try {
-        await api.request(`/api/v1/exam/sessions/${sessionId}/save-answer`, {
-          method: "POST",
-          body: JSON.stringify({
-            question_id: questionId,
-            answer: answer,
-            timestamp: new Date().toISOString(),
-          }),
-        });
+        console.log(
+          `🔄 ATTEMPTING TO SAVE - Question ${questionId}: "${answer}"`
+        );
+        const response = await api.request(
+          `/api/v1/exam/sessions/${sessionId}/save-answer`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              question_id: questionId,
+              answer: answer,
+              timestamp: new Date().toISOString(),
+            }),
+          }
+        );
+        console.log(`✅ SAVE SUCCESS - Response:`, response);
         const answerLength = answer ? answer.toString().length : 0;
         if (answerLength > 50) {
           console.log(
@@ -1277,15 +1468,52 @@ const ExamInterface = () => {
           console.log(`✅ Auto-saved answer for question ${questionId}`);
         }
       } catch (error) {
-        console.error("❌ Failed to auto-save answer:", error);
+        console.error(`❌ SAVE FAILED - Question ${questionId}:`, error);
       }
+    } else {
+      console.warn(
+        `⚠️ NOT SAVING - examStarted: ${examStarted}, sessionId: ${sessionId}`
+      );
     }
   };
 
   const handleSubmitExam = async (isAutoSubmit = false) => {
-    if (isSubmitting) return;
+    // Prevent submission if already submitting
+    if (isSubmitting) {
+      console.warn(
+        "⚠️ Submission already in progress, ignoring duplicate request"
+      );
+      return;
+    }
+
+    // Prevent submission if exam is already finished/submitted
+    const finalStates = [
+      "completed",
+      "submitted",
+      "finished",
+      "passed",
+      "failed",
+      "cancelled",
+    ];
+    if (examData && finalStates.includes(examData.status?.toLowerCase())) {
+      console.warn(
+        `⚠️ Cannot submit exam - already in final state: ${examData.status}`
+      );
+      alert(
+        `การสอบนี้ได้สิ้นสุดแล้ว (สถานะ: ${examData.status})\nไม่สามารถส่งคำตอบซ้ำได้`
+      );
+      return;
+    }
+
+    // Prevent submission if exam hasn't started
+    if (examData && examData.status === "waiting") {
+      console.warn("⚠️ Cannot submit exam - exam hasn't started yet");
+      alert("การสอบยังไม่ได้เริ่มต้น กรุณาเริ่มการสอบก่อน");
+      return;
+    }
 
     setIsSubmitting(true);
+    console.log(`📝 Starting exam submission for session ${sessionId}...`);
 
     try {
       // Submit exam to database API
@@ -1373,6 +1601,17 @@ const ExamInterface = () => {
                     }
                     fullWidth
                     onClick={() => handleAnswerChange(question.id, option)}
+                    disabled={
+                      examData &&
+                      [
+                        "completed",
+                        "submitted",
+                        "finished",
+                        "passed",
+                        "failed",
+                        "cancelled",
+                      ].includes(examData.status?.toLowerCase())
+                    }
                     sx={{ textAlign: "left", justifyContent: "flex-start" }}
                   >
                     {option}
@@ -1466,6 +1705,17 @@ const ExamInterface = () => {
                     onChange={(e) =>
                       handleAnswerChange(question.id, e.target.value)
                     }
+                    disabled={
+                      examData &&
+                      [
+                        "completed",
+                        "submitted",
+                        "finished",
+                        "passed",
+                        "failed",
+                        "cancelled",
+                      ].includes(examData.status?.toLowerCase())
+                    }
                     onKeyDown={(e) => {
                       // Handle Tab key for indentation
                       if (e.key === "Tab") {
@@ -1535,6 +1785,17 @@ function solution() {
             <textarea
               value={answers[question.id] || ""}
               onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+              disabled={
+                examData &&
+                [
+                  "completed",
+                  "submitted",
+                  "finished",
+                  "passed",
+                  "failed",
+                  "cancelled",
+                ].includes(examData.status?.toLowerCase())
+              }
               placeholder={t("exam.enter_answer")}
               style={{
                 width: "100%",
@@ -1576,6 +1837,31 @@ function solution() {
         🤖 YOLO11 AI SYSTEM - ระบบตรวจจับการโกงด้วย AI | Real-time pose
         detection กำลังทำงาน
       </Box>
+
+      {/* Exam Finished Banner */}
+      {examData &&
+        [
+          "completed",
+          "submitted",
+          "finished",
+          "passed",
+          "failed",
+          "cancelled",
+        ].includes(examData.status?.toLowerCase()) && (
+          <Box
+            sx={{
+              bgcolor: "error.main",
+              color: "white",
+              p: 2,
+              textAlign: "center",
+              fontSize: "16px",
+              fontWeight: "bold",
+            }}
+          >
+            🚫 การสอบได้สิ้นสุดแล้ว (สถานะ: {examData.status.toUpperCase()}) -
+            ไม่สามารถแก้ไขคำตอบหรือส่งข้อมูลซ้ำได้
+          </Box>
+        )}
 
       {/* Header with timer and status */}
       <Paper
@@ -1708,10 +1994,31 @@ function solution() {
                       variant="contained"
                       color="success"
                       onClick={() => handleSubmitExam()}
-                      disabled={isSubmitting}
+                      disabled={
+                        isSubmitting ||
+                        (examData &&
+                          [
+                            "completed",
+                            "submitted",
+                            "finished",
+                            "passed",
+                            "failed",
+                            "cancelled",
+                          ].includes(examData.status?.toLowerCase()))
+                      }
                     >
                       {isSubmitting
                         ? t("messages.loading")
+                        : examData &&
+                          [
+                            "completed",
+                            "submitted",
+                            "finished",
+                            "passed",
+                            "failed",
+                            "cancelled",
+                          ].includes(examData.status?.toLowerCase())
+                        ? `สอบสิ้นสุดแล้ว (${examData.status})`
                         : t("exam.submit_exam")}
                     </Button>
                   )}
@@ -2193,6 +2500,38 @@ function solution() {
                         ))}
                       </Box>
                     )}
+
+                  {/* Warning Tracker Status - Now popup modal */}
+                  <Box
+                    sx={{ mt: 1, p: 1, bgcolor: "#f5f5f5", borderRadius: 1 }}
+                  >
+                    <Typography
+                      variant="caption"
+                      display="block"
+                      sx={{ fontWeight: "bold", mb: 1 }}
+                    >
+                      🔍 Warning Tracker:
+                      {showWarningTracker ? (
+                        <Chip
+                          size="small"
+                          label="แสดงใน Popup"
+                          color="warning"
+                          sx={{ ml: 1 }}
+                        />
+                      ) : (
+                        <Chip
+                          size="small"
+                          label="ไม่มีกิจกรรมน่าสงสัย"
+                          color="success"
+                          sx={{ ml: 1 }}
+                        />
+                      )}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      ระบบติดตามแบบ Real-time
+                      จะแสดงป๊อบอัพกลางหน้าจอเมื่อตรวจพบกิจกรรมน่าสงสัย
+                    </Typography>
+                  </Box>
                 </Box>
               }
 
@@ -2294,6 +2633,258 @@ function solution() {
             {t("fullscreen.continue")}
           </Button>
         </DialogActions>
+      </Dialog>
+
+      {/* Cheat Warning Modal */}
+      <Dialog
+        open={showCheatWarning}
+        disableEscapeKeyDown
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: "#fff3e0",
+            border: "2px solid #ff9800",
+          },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            bgcolor: "#ff9800",
+            color: "white",
+            mb: 2,
+          }}
+        >
+          <Warning sx={{ mr: 1, fontSize: 28 }} />
+          {t("cheat_warning.title")}
+        </DialogTitle>
+
+        <DialogContent sx={{ pt: 2 }}>
+          <Box sx={{ textAlign: "center", mb: 2 }}>
+            <Typography variant="h6" color="text.primary" gutterBottom>
+              {t("cheat_warning.subtitle")}
+            </Typography>
+
+            <Typography variant="body1" sx={{ mb: 2, fontWeight: "medium" }}>
+              {cheatWarningData.message}
+            </Typography>
+
+            <Chip
+              label={`${t("cheat_warning.warning_count")} ${
+                cheatWarningData.count
+              }`}
+              color="warning"
+              sx={{ mb: 2 }}
+            />
+
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="body2">{t("cheat_warning.note")}</Typography>
+            </Alert>
+
+            <Box
+              sx={{
+                p: 2,
+                bgcolor: "rgba(0,0,0,0.05)",
+                borderRadius: 1,
+                border: "1px dashed #ccc",
+                mt: 2,
+              }}
+            >
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                display="block"
+              >
+                🤖 ระบบตรวจจับการโกงด้วย AI
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                📹 กล้องและระบบ AI กำลังตรวจสอบการสอบของคุณอย่างต่อเนื่อง
+              </Typography>
+            </Box>
+          </Box>
+        </DialogContent>
+
+        <DialogActions sx={{ justifyContent: "center", pb: 3 }}>
+          <Button
+            onClick={handleCheatWarningResponse}
+            variant="contained"
+            size="large"
+            color="warning"
+            sx={{
+              minWidth: 200,
+              py: 1.5,
+              fontSize: "1.1rem",
+              fontWeight: "bold",
+            }}
+          >
+            {t("cheat_warning.continue_button")}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Warning Tracker Popup Modal */}
+      <Dialog
+        open={showWarningTracker}
+        disableEscapeKeyDown={false}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: "rgba(255, 243, 224, 0.95)",
+            border: "2px solid #ff9800",
+            backdropFilter: "blur(10px)",
+            position: "fixed",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            maxHeight: "400px",
+            borderRadius: 2,
+          },
+        }}
+        onClose={() => setShowWarningTracker(false)}
+        BackdropProps={{
+          sx: {
+            backgroundColor: "rgba(0, 0, 0, 0.3)",
+          },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            bgcolor: "#ff9800",
+            color: "white",
+            py: 1.5,
+            fontSize: "1rem",
+          }}
+        >
+          <Warning sx={{ mr: 1, fontSize: 24 }} />
+          🔍 ระบบติดตาม Warning Tracker
+        </DialogTitle>
+
+        <DialogContent sx={{ py: 2 }}>
+          <Box sx={{ mb: 1 }}>
+            <Typography
+              variant="caption"
+              display="block"
+              sx={{ fontWeight: "bold", mb: 1, color: "text.primary" }}
+            >
+              ⚠️ กิจกรรมน่าสงสัยที่ตรวจพบ:
+            </Typography>
+
+            {Object.entries(suspiciousActivityTracker).map(
+              ([activity, tracker]) =>
+                tracker.startTime && (
+                  <Box
+                    key={activity}
+                    sx={{
+                      mb: 1.5,
+                      p: 1,
+                      bgcolor: "rgba(255, 152, 0, 0.1)",
+                      borderRadius: 1,
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        mb: 0.5,
+                      }}
+                    >
+                      <Typography
+                        variant="body2"
+                        sx={{ fontWeight: "medium", color: "warning.dark" }}
+                      >
+                        {activity === "head_turned_away" &&
+                          "👀 หันหน้าไปทางอื่น"}
+                        {activity === "head_down_detected" && "🔽 ก้มหน้าลง"}
+                        {activity === "mobile_phone_detected" &&
+                          "📱 ตรวจพบโทรศัพท์"}
+                        {activity === "looking_away_detected" &&
+                          "👁️ มองไปทางอื่น"}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{ fontWeight: "bold", color: "error.main" }}
+                      >
+                        {Math.round(tracker.duration / 1000)}วินาที
+                      </Typography>
+                    </Box>
+
+                    <LinearProgress
+                      variant="determinate"
+                      value={Math.min((tracker.duration / 5000) * 100, 100)}
+                      color={tracker.duration >= 5000 ? "error" : "warning"}
+                      sx={{
+                        height: 8,
+                        borderRadius: 4,
+                        bgcolor: "rgba(0,0,0,0.1)",
+                        "& .MuiLinearProgress-bar": {
+                          borderRadius: 4,
+                        },
+                      }}
+                    />
+
+                    {tracker.warningCount > 0 && (
+                      <Typography
+                        variant="caption"
+                        sx={{ mt: 0.5, display: "block", color: "error.main" }}
+                      >
+                        ⚠️ เตือนแล้ว {tracker.warningCount} ครั้ง
+                      </Typography>
+                    )}
+
+                    {tracker.duration >= 5000 && (
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          mt: 0.5,
+                          display: "block",
+                          color: "error.main",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        🚨 เกินเวลา! กำลังแสดงคำเตือน...
+                      </Typography>
+                    )}
+                  </Box>
+                )
+            )}
+
+            {!Object.values(suspiciousActivityTracker).some(
+              (tracker) => tracker.startTime
+            ) && (
+              <Box sx={{ textAlign: "center", py: 2, color: "text.secondary" }}>
+                <Typography variant="body2">✅ ไม่พบกิจกรรมน่าสงสัย</Typography>
+              </Box>
+            )}
+          </Box>
+
+          <Box
+            sx={{
+              mt: 2,
+              p: 1.5,
+              bgcolor: "rgba(0,0,0,0.05)",
+              borderRadius: 1,
+              border: "1px dashed #ccc",
+            }}
+          >
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              display="block"
+              sx={{ mb: 0.5 }}
+            >
+              🤖 ระบบติดตามแบบ Real-time
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              📊 เกณฑ์เตือน: 5 วินาที | 📹 บันทึกทุกกิจกรรม
+            </Typography>
+          </Box>
+        </DialogContent>
       </Dialog>
     </Box>
   );

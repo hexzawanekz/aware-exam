@@ -1,7 +1,7 @@
 version: "3.8"
 
 services:
-  # Backend Service
+  # Backend Service (Full version)
   backend:
     build:
       context: ./backend
@@ -23,20 +23,46 @@ services:
       - exam_videos:/app/exam_videos
     depends_on:
       - postgres
-      - qdrant
       - redis
+      - qdrant
     deploy:
       resources:
         limits:
           memory: 2G
         reservations:
           memory: 1G
+    profiles:
+      - full
+      - dev
+      - "" # Default profile
 
-  # Frontend Service
+  # Backend Service (Lite version)
+  backend-lite:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile-lite
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://recruitment_user:recruitment_pass@postgres:5432/recruitment_db
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your_jwt_secret_key
+      - GOOGLE_CREDENTIALS_PATH=/app/credentials/google-credentials.json
+      - FACE_DETECTION_ENABLED=false
+      - AI_FEATURES_ENABLED=false
+    volumes:
+      - ./credentials:/app/credentials
+    depends_on:
+      - postgres
+      - redis
+    profiles:
+      - lite
+
+  # Frontend Service (Production)
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
     ports:
       - "3000:3000"
     environment:
@@ -47,8 +73,51 @@ services:
       - /app/node_modules
     depends_on:
       - backend
+    profiles:
+      - full
+      - "" # Default profile
 
-  # n8n Service
+  # Frontend Service (Development with Hot Reload)
+  frontend-dev:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_WS_URL=ws://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    stdin_open: true
+    tty: true
+    profiles:
+      - dev
+
+  # Frontend Service (Lite)
+  frontend-lite:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_WS_URL=ws://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend-lite
+    profiles:
+      - lite
+
+  # n8n Service (Full and Dev only)
   n8n:
     image: n8nio/n8n
     ports:
@@ -67,27 +136,36 @@ services:
       - n8n_data:/home/node/.n8n
     depends_on:
       - postgres
+    profiles:
+      - full
+      - dev
+      - "" # Default profile
 
-  # PostgreSQL Database
+  # PostgreSQL Database (All profiles)
   postgres:
     image: postgres:13
     environment:
       - POSTGRES_DB=recruitment_db
       - POSTGRES_USER=recruitment_user
       - POSTGRES_PASSWORD=recruitment_pass
+    ports:
+      - "5432:5432" # Exposed for lite mode
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d
 
-  # Qdrant Vector Database
+  # Qdrant Vector Database (Full and Dev only)
   qdrant:
     image: qdrant/qdrant
     ports:
       - "6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
+    profiles:
+      - full
+      - dev
+      - "" # Default profile
 
-  # Redis Cache
+  # Redis Cache (All profiles)
   redis:
     image: redis:6
     ports:

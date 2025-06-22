@@ -288,6 +288,14 @@ class ApiService {
       method: "DELETE",
     });
   }
+
+  // Candidate detailed results - for admin candidate detail page
+  async getCandidateDetailedResults(candidateId, sessionId = null) {
+    const params = sessionId ? `?session_id=${sessionId}` : "";
+    return this.request(
+      `/api/v1/candidate/${candidateId}/exam-results-detailed${params}`
+    );
+  }
 }
 
 export default new ApiService();

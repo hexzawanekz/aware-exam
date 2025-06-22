@@ -160,29 +160,54 @@ async def save_answer(
     db: Session = Depends(get_db)
 ):
     """บันทึกคำตอบของผู้สมัคร (auto-save)"""
+    # Enhanced debugging
+    print(f"🔍 SAVE ANSWER DEBUG - Session: {session_id}")
+    print(f"📝 Answer data received: {answer_data}")
+    
     session = db.query(ExamSession).filter(ExamSession.session_id == session_id).first()
     if not session:
+        print(f"❌ Session not found: {session_id}")
         raise HTTPException(status_code=404, detail="ไม่พบเซสชันการสอบ")
     
-    # อัพเดทคำตอบ
+    # อัพเดทคำตอบ - Fix SQLite JSON detection issue
     current_answers = session.answers or {}
     question_id = str(answer_data.get("question_id"))
     answer = answer_data.get("answer")
     timestamp = answer_data.get("timestamp", datetime.utcnow().isoformat())
     
-    current_answers[question_id] = {
+    print(f"📋 Current answers before save: {list(current_answers.keys())}")
+    print(f"🔢 Question ID: {question_id}")
+    print(f"✏️ Answer: {answer}")
+    print(f"⏰ Timestamp: {timestamp}")
+    
+    # Create a new dictionary to ensure SQLAlchemy detects the change
+    new_answers = dict(current_answers)  # Copy existing answers
+    new_answers[question_id] = {
         "answer": answer,
         "timestamp": timestamp
     }
     
-    session.answers = current_answers
+    session.answers = new_answers  # Assign the new dictionary
     session.updated_at = datetime.utcnow()
-    db.commit()
+    
+    # Force SQLAlchemy to detect the change
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(session, "answers")
+    
+    try:
+        db.commit()
+        print(f"✅ Successfully saved answer for question {question_id}")
+        print(f"📊 Total answers now: {list(current_answers.keys())}")
+    except Exception as e:
+        print(f"❌ Failed to save answer: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"ไม่สามารถบันทึกคำตอบได้: {str(e)}")
     
     return {
         "message": "บันทึกคำตอบเรียบร้อยแล้ว",
         "question_id": question_id,
-        "timestamp": timestamp
+        "timestamp": timestamp,
+        "total_answers": len(current_answers)
     }
 
 @router.post("/sessions/{session_id}/submit")
@@ -933,6 +958,27 @@ async def get_exam_session_details(
         "current_score": session.score
     }
 
+@router.get("/sessions/{session_id}/questions")
+async def get_exam_session_questions(
+    session_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get exam questions for a specific session"""
+    session = db.query(ExamSession).filter(ExamSession.session_id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Exam session not found")
+    
+    # Return randomized questions if available, otherwise use template questions
+    questions = session.randomized_questions or (session.exam_template.questions if session.exam_template else [])
+    
+    return {
+        "session_id": session_id,
+        "questions": questions,
+        "total_questions": len(questions) if questions else 0,
+        "exam_template_id": session.exam_template_id,
+        "exam_name": session.exam_template.name if session.exam_template else "Unknown"
+    }
+
 @router.get("/sessions/{session_id}/proctoring-logs")
 async def get_proctoring_logs(
     session_id: str,
@@ -966,34 +1012,54 @@ async def update_exam_results(
     results_data: Dict,
     db: Session = Depends(get_db)  
 ):
-    """Update exam session with final results from N8N workflow"""
+    """Update exam session with comprehensive AI evaluation results from N8N workflow"""
     session = db.query(ExamSession).filter(ExamSession.session_id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Exam session not found")
     
-    # Update exam session with results
-    session.score = results_data.get("score")
-    session.status = results_data.get("status", "completed")
+    # Extract AI results from the payload
+    ai_results = results_data.get("ai_results", {})
+    evaluation_method = results_data.get("evaluation_method", "unknown")
     
-    # Store additional analysis data
+    # Update basic session data
+    if "total_score" in ai_results:
+        session.score = ai_results["total_score"]
+    if "status" in ai_results:
+        session.status = ai_results["status"]
+    
+    # Store comprehensive AI evaluation results
     if not session.suspicious_activities:
         session.suspicious_activities = {}
     
+    # Merge AI evaluation results with existing data
     session.suspicious_activities.update({
-        "cheating_probability": results_data.get("cheating_probability"),
-        "ai_confidence": results_data.get("ai_confidence"),
-        "suspicious_events": results_data.get("suspicious_events", []),
-        "analysis_metadata": results_data.get("analysis_metadata", {}),
-        "last_updated": datetime.utcnow().isoformat()
+        "ai_evaluation": {
+            "total_score": ai_results.get("total_score", 0),
+            "status": ai_results.get("status", "failed"),
+            "multiple_choice_score": ai_results.get("multiple_choice_score", {}),
+            "coding_scores": ai_results.get("coding_scores", []),
+            "criteria_analysis": ai_results.get("criteria_analysis", {}),
+            "overall_feedback": ai_results.get("overall_feedback", ""),
+            "recommendation": ai_results.get("recommendation", ""),
+            "detailed_analysis": ai_results.get("detailed_analysis", {}),
+            "score_breakdown": ai_results.get("score_breakdown", {}),
+            "evaluation_metadata": ai_results.get("evaluation_metadata", {})
+        },
+        "evaluation_method": evaluation_method,
+        "last_updated": datetime.utcnow().isoformat(),
+        "ai_processing_timestamp": results_data.get("timestamp", datetime.utcnow().isoformat())
     })
     
     db.commit()
     
     return {
-        "message": "Exam results updated successfully",
+        "message": "Comprehensive AI evaluation results updated successfully",
         "session_id": session_id,
         "score": session.score,
-        "status": session.status
+        "status": session.status,
+        "evaluation_method": evaluation_method,
+        "ai_total_score": ai_results.get("total_score"),
+        "update_timestamp": datetime.utcnow().isoformat()
     }
 
 @router.get("/candidates/{candidate_id}/results")
@@ -1001,7 +1067,7 @@ async def get_candidate_results(
     candidate_id: int,
     db: Session = Depends(get_db)
 ):
-    """Get candidate exam results for admin interface"""
+    """Get comprehensive candidate exam results with AI evaluation for admin interface"""
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
@@ -1030,8 +1096,113 @@ async def get_candidate_results(
             "duration": log.event_metadata.get("duration", "1 วินาที") if log.event_metadata else "1 วินาที"
         })
     
-    # Get suspicious activities data
+    # Get suspicious activities and AI evaluation data
     suspicious_data = exam_session.suspicious_activities or {}
+    ai_evaluation = suspicious_data.get("ai_evaluation", {})
+    
+    # Debug logging
+    print(f"🔍 Debug - Candidate {candidate_id} AI evaluation check:")
+    print(f"   - Has suspicious_data: {bool(suspicious_data)}")
+    print(f"   - Has ai_evaluation: {bool(ai_evaluation)}")
+    if ai_evaluation:
+        print(f"   - AI evaluation keys: {list(ai_evaluation.keys())}")
+        if ai_evaluation.get("ai_results"):
+            print(f"   - Has ai_results structure")
+        if ai_evaluation.get("total_score"):
+            print(f"   - Has direct total_score: {ai_evaluation.get('total_score')}")
+    print(f"   - Session ID: {exam_session.session_id}")
+    
+    # Prepare AI-generated results or fallback data
+    # Check if we have AI evaluation data (either from real workflow or inserted data)
+    has_ai_results = ai_evaluation and (
+        ai_evaluation.get("ai_results") or  # New structure with ai_results
+        ai_evaluation.get("total_score") or  # Direct structure
+        ai_evaluation.get("evaluation_metadata", {}).get("processing_method") == "google_ai"  # Original check
+    )
+    
+    if has_ai_results:
+        # Extract AI results - handle both old and new data structures
+        ai_results_data = ai_evaluation.get("ai_results", ai_evaluation)  # New structure or direct
+        
+        # Use real AI evaluation results
+        exam_results = {
+            "overall_score": ai_results_data.get("total_score", 0),
+            "status": "ผ่านการสอบ" if ai_results_data.get("status") == "passed" else "ไม่ผ่านการสอบ",
+            "ai_recommendation": ai_results_data.get("recommendation", "ต้องการการประเมินเพิ่มเติม"),
+            "overall_feedback": ai_results_data.get("overall_feedback", "ไม่มีความเห็นเพิ่มเติม"),
+            
+            # Score breakdown
+            "score_breakdown": ai_results_data.get("score_breakdown", {}),
+            "multiple_choice_score": ai_results_data.get("multiple_choice_score", {}),
+            "coding_scores": ai_results_data.get("coding_scores", []),
+            
+            # Criteria analysis (วิเคราะห์ผลการสอบตามหัวข้อ) - try both locations
+            "criteria_analysis": (
+                ai_results_data.get("multiple_choice_score", {}).get("criteria_breakdown", {}) or
+                ai_results_data.get("criteria_analysis", {})
+            ),
+            
+            # Detailed analysis (รายละเอียดข้อสอบ)
+            "detailed_analysis": {
+                "strengths": ai_results_data.get("detailed_analysis", {}).get("strengths", []),
+                "weaknesses": ai_results_data.get("detailed_analysis", {}).get("weaknesses", []),
+                "suggestions": ai_results_data.get("detailed_analysis", {}).get("suggestions", [])
+            },
+            
+            # Evaluation metadata
+            "evaluation_method": suspicious_data.get("evaluation_method", "google_ai"),
+            "ai_model": ai_evaluation.get("evaluation_metadata", {}).get("ai_model", "gemini-1.5-pro"),
+            "evaluation_timestamp": suspicious_data.get("ai_processing_timestamp", "ไม่ระบุ")
+        }
+    else:
+        # Fallback to basic evaluation
+        basic_score = int(exam_session.score) if exam_session.score else 0
+        exam_results = {
+            "overall_score": basic_score,
+            "status": "ผ่านการสอบ" if exam_session.status == "passed" else "ไม่ผ่านการสอบ",
+            "ai_recommendation": "แนะนำให้รับเข้าทำงาน" if basic_score >= 70 else "พิจารณาเพิ่มเติม" if basic_score >= 50 else "ไม่แนะนำ",
+            "overall_feedback": "ผลการประเมินจากระบบอัตโนมัติ - ต้องการการตรวจสอบเพิ่มเติมจาก AI",
+            
+            "score_breakdown": {
+                "total": basic_score,
+                "total_max": 100,
+                "percentage": basic_score
+            },
+            "multiple_choice_score": {"score": 0, "max_score": 0, "percentage": 0},
+            "coding_scores": [],
+            
+            "criteria_analysis": {
+                "programming_fundamentals": {
+                    "score": int(basic_score * 0.4),
+                    "max_score": 40,
+                    "feedback": "ต้องการการประเมินเพิ่มเติมจาก AI"
+                },
+                "problem_solving": {
+                    "score": int(basic_score * 0.3),
+                    "max_score": 30,
+                    "feedback": "ต้องการการประเมินเพิ่มเติมจาก AI"
+                },
+                "code_quality": {
+                    "score": int(basic_score * 0.3),
+                    "max_score": 30,
+                    "feedback": "ต้องการการประเมินเพิ่มเติมจาก AI"
+                }
+            },
+            
+            "detailed_analysis": {
+                "strengths": ["ส่งงานตรงเวลา", "ครบถ้วนตามที่กำหนด"],
+                "weaknesses": ["ต้องการการประเมินจาก AI เพื่อความแม่นยำ"],
+                "suggestions": ["รอการประเมินจาก Google AI", "ติดต่อผู้ดูแลระบบหากมีปัญหา"]
+            },
+            
+            "evaluation_method": "fallback",
+            "ai_model": "basic_evaluation",
+            "evaluation_timestamp": exam_session.updated_at.isoformat() if exam_session.updated_at else "ไม่ระบุ"
+        }
+    
+    # Calculate cheating analysis
+    cheating_probability = suspicious_data.get("cheating_probability", 0)
+    ai_confidence = suspicious_data.get("ai_confidence", 85)
     
     return {
         "id": candidate.id,
@@ -1040,14 +1211,32 @@ async def get_candidate_results(
         "email": candidate.email,
         "phone": candidate.phone,
         "position": exam_session.exam_template.position.name if exam_session.exam_template else "ไม่ระบุ",
-        "status": "ผ่านการสอบ" if exam_session.status == "passed" else "ไม่ผ่านการสอบ",
-        "exam_score": int(exam_session.score) if exam_session.score else 0,
+        "exam_template_name": exam_session.exam_template.name if exam_session.exam_template else "ไม่ระบุ",
+        "programming_language": exam_session.exam_template.programming_language if exam_session.exam_template else "ไม่ระบุ",
+        
+        # Basic info
         "exam_date": exam_session.start_time.strftime("%Y-%m-%d %H:%M:%S") if exam_session.start_time else "ไม่ระบุ",
         "exam_duration": f"{exam_session.exam_template.duration_minutes} นาที" if exam_session.exam_template else "60 นาที",
-        "cheating_percentage": suspicious_data.get("cheating_probability", 0),
-        "ai_confidence": suspicious_data.get("ai_confidence", 85),
-        "proctoring_events": proctoring_events,
-        "video_segments": generate_mock_video_segments(proctoring_events)
+        
+        # Main results (ผลการสอบ)
+        "exam_results": exam_results,
+        
+        # Anti-cheat analysis
+        "proctoring_analysis": {
+            "cheating_percentage": cheating_probability,
+            "ai_confidence": ai_confidence,
+            "total_events": len(proctoring_events),
+            "proctoring_events": proctoring_events,
+            "video_segments": generate_mock_video_segments(proctoring_events)
+        },
+        
+        # Session metadata
+        "session_metadata": {
+            "session_id": exam_session.session_id,
+            "status": exam_session.status,
+            "evaluation_method": suspicious_data.get("evaluation_method", "basic"),
+            "last_updated": suspicious_data.get("last_updated", exam_session.updated_at.isoformat() if exam_session.updated_at else "ไม่ระบุ")
+        }
     }
 
 def get_event_description(event_type: str) -> str:

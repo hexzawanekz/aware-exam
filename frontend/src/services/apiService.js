@@ -175,6 +175,13 @@ class ApiService {
   async getExamSessionDetail(id) {
     return this.request(`/admin/exam-sessions/${id}`);
   }
+
+  async getCandidateDetailedResults(candidateId, sessionId = null) {
+    const params = sessionId ? `?session_id=${sessionId}` : "";
+    return this.request(
+      `/candidate/${candidateId}/exam-results-detailed${params}`
+    );
+  }
 }
 
 export default new ApiService();
