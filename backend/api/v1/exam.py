@@ -1,12 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 import json
 import uuid
 import asyncio
+import os
 from datetime import datetime, timedelta
 import random
+import logging
 
 from core.database import get_db
 from models.exam import ExamSession, ExamTemplate, Candidate, ProctoringLog, Company, Department, Position
@@ -15,6 +18,9 @@ from services.face_detection_yolo11 import yolo11_pose_service
 from services.google_forms import google_forms_service
 from services.n8n_integration import n8n_service
 from utils.websocket_manager import WebSocketManager
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 security = HTTPBearer()
@@ -107,7 +113,7 @@ async def verify_face(
     frame_data: Dict,
     db: Session = Depends(get_db)
 ):
-    """ตรวจสอบใบหน้าแบบ real-time"""
+    """ตรวจสอบใบหน้าแบบ real-time พร้อมบันทึก evidence"""
     session = db.query(ExamSession).filter(ExamSession.session_id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="ไม่พบเซสชันการสอบ")
@@ -115,41 +121,62 @@ async def verify_face(
     # Select appropriate detection service
     detection_service = get_detection_service(session_id)
     
-    # ตรวจสอบใบหน้า
+    # ตรวจสอบใบหน้า - ส่ง session_id เพื่อให้บันทึก evidence ได้
     result = await detection_service.verify_face_from_frame(
         session.candidate_id,
-        frame_data.get("frame")
+        frame_data.get("frame"),
+        session_id  # Add session_id for evidence capture
     )
     
     # บันทึกผลการตรวจสอบ
     if not result["face_detected"]:
         session.absent_frames_count += 1
         
-        # บันทึก log
+        # บันทึก log พร้อม evidence data
+        evidence_capture = result.get("evidence_capture", {})
         log = ProctoringLog(
             exam_session_id=session.id,
             event_type="face_lost",
             confidence=result.get("confidence", 0.0),
-            event_metadata=result
+            event_metadata=result,
+            evidence_level=evidence_capture.get("evidence_level", "low"),
+            captured_frame_url=evidence_capture.get("captured_frame_path"),
+            frame_analysis=result,
+            cheating_score=evidence_capture.get("evidence_score", 0.0)
         )
         db.add(log)
     
     # ตรวจสอบกิจกรรมน่าสงสัย
     if result["suspicious_activity"]:
+        evidence_capture = result.get("evidence_capture", {})
         for activity in result["suspicious_activity"]:
+            # Calculate individual activity score
+            activity_score = evidence_capture.get("evidence_score", 0.0)
+            
             log = ProctoringLog(
                 exam_session_id=session.id,
                 event_type=activity,
                 confidence=result.get("confidence", 0.0),
-                event_metadata=result
+                event_metadata=result,
+                evidence_level=evidence_capture.get("evidence_level", "low"),
+                captured_frame_url=evidence_capture.get("captured_frame_path"),
+                frame_analysis=result,
+                cheating_score=activity_score
             )
             db.add(log)
+            
+            # Update session counters based on activity type
+            if activity == "mobile_phone_detected":
+                session.phone_detection_count += 1
     
     session.face_verification_count += 1
     db.commit()
     
-    # ส่งข้อมูลไปที่ n8n สำหรับการวิเคราะห์
-    await n8n_service.send_proctoring_data(session_id, result)
+    # ส่งข้อมูลไปที่ n8n สำหรับการวิเคราะห์ (เฉพาะ evidence score สูง)
+    evidence_capture = result.get("evidence_capture", {})
+    if evidence_capture.get("threshold_exceeded", False):
+        await n8n_service.send_proctoring_data(session_id, result)
+        print(f"🤖 High evidence sent to N8N: {evidence_capture.get('evidence_score')}% - {evidence_capture.get('evidence_level')}")
     
     return result
 
@@ -984,74 +1011,232 @@ async def get_proctoring_logs(
     session_id: str,
     db: Session = Depends(get_db)
 ):
-    """Get proctoring logs for analysis"""
+    """Get enhanced proctoring logs with evidence data"""
     session = db.query(ExamSession).filter(ExamSession.session_id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Exam session not found")
     
-    logs = db.query(ProctoringLog).filter(ProctoringLog.exam_session_id == session.id).all()
+    logs = db.query(ProctoringLog).filter(ProctoringLog.exam_session_id == session.id).order_by(ProctoringLog.timestamp.desc()).all()
     
     proctoring_logs = []
+    evidence_summary = {
+        "total_events": len(logs),
+        "high_evidence_events": 0,
+        "frames_captured": 0,
+        "average_cheating_score": 0.0,
+        "evidence_levels": {"low": 0, "medium": 0, "high": 0, "critical": 0}
+    }
+    
+    total_score = 0.0
+    
     for log in logs:
-        proctoring_logs.append({
+        log_data = {
+            "id": log.id,
             "timestamp": log.timestamp.isoformat(),
             "event_type": log.event_type,
             "confidence": log.confidence,
-            "event_metadata": log.event_metadata
-        })
+            "event_metadata": log.event_metadata,
+            "evidence_level": log.evidence_level,
+            "cheating_score": log.cheating_score,
+            "frame_captured": log.captured_frame_url is not None,
+            "captured_frame_url": log.captured_frame_url,
+            "ai_processed": log.processed
+        }
+        proctoring_logs.append(log_data)
+        
+        # Update evidence summary
+        if log.cheating_score >= 75:
+            evidence_summary["high_evidence_events"] += 1
+        if log.captured_frame_url:
+            evidence_summary["frames_captured"] += 1
+        if log.evidence_level in evidence_summary["evidence_levels"]:
+            evidence_summary["evidence_levels"][log.evidence_level] += 1
+        
+        total_score += log.cheating_score or 0.0
+    
+    if len(logs) > 0:
+        evidence_summary["average_cheating_score"] = round(total_score / len(logs), 2)
     
     return {
         "session_id": session_id,
         "proctoring_logs": proctoring_logs,
-        "total_events": len(proctoring_logs)
+        "evidence_summary": evidence_summary
     }
 
-@router.post("/sessions/{session_id}/update-results")
-async def update_exam_results(
+@router.get("/evidence-frame/{filename}")
+async def get_evidence_frame(filename: str):
+    """Serve evidence frame images"""
+    try:
+        # Security check - only allow files with specific pattern
+        if not filename.startswith("evidence_") or not filename.endswith(".jpg"):
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        file_path = os.path.join("evidence_frames", filename)
+        
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Evidence frame not found")
+        
+        return FileResponse(file_path, media_type="image/jpeg")
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error serving evidence frame: {str(e)}")
+
+@router.get("/sessions/{session_id}/evidence-summary")
+async def get_evidence_summary(
     session_id: str,
-    results_data: Dict,
-    db: Session = Depends(get_db)  
+    db: Session = Depends(get_db)
 ):
-    """Update exam session with comprehensive AI evaluation results from N8N workflow"""
+    """Get evidence summary for a session"""
     session = db.query(ExamSession).filter(ExamSession.session_id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Exam session not found")
     
-    # Extract AI results from the payload
-    ai_results = results_data.get("ai_results", {})
-    evaluation_method = results_data.get("evaluation_method", "unknown")
+    # Get logs with evidence
+    evidence_logs = db.query(ProctoringLog).filter(
+        ProctoringLog.exam_session_id == session.id,
+        ProctoringLog.cheating_score > 0
+    ).order_by(ProctoringLog.timestamp.desc()).all()
     
-    # Update basic session data
-    if "total_score" in ai_results:
-        session.score = ai_results["total_score"]
-    if "status" in ai_results:
-        session.status = ai_results["status"]
+    # Calculate statistics
+    total_evidence_events = len(evidence_logs)
+    high_risk_events = len([log for log in evidence_logs if log.cheating_score >= 90])
+    medium_risk_events = len([log for log in evidence_logs if log.cheating_score >= 75 and log.cheating_score < 90])
+    captured_frames = len([log for log in evidence_logs if log.captured_frame_url])
     
-    # Store comprehensive AI evaluation results
-    if not session.suspicious_activities:
-        session.suspicious_activities = {}
+    # Get unique event types
+    event_types = {}
+    for log in evidence_logs:
+        event_type = log.event_type
+        if event_type not in event_types:
+            event_types[event_type] = {"count": 0, "max_score": 0, "avg_score": 0, "total_score": 0}
+        event_types[event_type]["count"] += 1
+        event_types[event_type]["max_score"] = max(event_types[event_type]["max_score"], log.cheating_score)
+        event_types[event_type]["total_score"] += log.cheating_score
     
-    # Create a NEW dictionary to force SQLAlchemy to detect the change (JSON field tracking issue)
-    updated_activities = dict(session.suspicious_activities) if session.suspicious_activities else {}
-    updated_activities["ai_evaluation"] = ai_results  # Store AI results directly
-    updated_activities["evaluation_method"] = evaluation_method
-    updated_activities["last_updated"] = datetime.utcnow().isoformat()
-    updated_activities["ai_processing_timestamp"] = results_data.get("timestamp", datetime.utcnow().isoformat())
+    # Calculate averages
+    for event_type in event_types:
+        event_types[event_type]["avg_score"] = round(event_types[event_type]["total_score"] / event_types[event_type]["count"], 2)
     
-    # Reassign the entire field to force SQLAlchemy change detection
-    session.suspicious_activities = updated_activities
-    
-    db.commit()
+    # Overall cheating risk assessment
+    if total_evidence_events == 0:
+        risk_level = "low"
+        overall_score = 0
+    else:
+        overall_score = sum(log.cheating_score for log in evidence_logs) / total_evidence_events
+        if overall_score >= 90:
+            risk_level = "critical"
+        elif overall_score >= 75:
+            risk_level = "high"
+        elif overall_score >= 50:
+            risk_level = "medium"
+        else:
+            risk_level = "low"
     
     return {
-        "message": "Comprehensive AI evaluation results updated successfully",
         "session_id": session_id,
-        "score": session.score,
-        "status": session.status,
-        "evaluation_method": evaluation_method,
-        "ai_total_score": ai_results.get("total_score"),
-        "update_timestamp": datetime.utcnow().isoformat()
+        "overall_risk_level": risk_level,
+        "overall_score": round(overall_score, 2),
+        "statistics": {
+            "total_evidence_events": total_evidence_events,
+            "high_risk_events": high_risk_events,
+            "medium_risk_events": medium_risk_events,
+            "captured_frames": captured_frames
+        },
+        "event_breakdown": event_types,
+        "recent_high_risk_events": [
+            {
+                "timestamp": log.timestamp.isoformat(),
+                "event_type": log.event_type,
+                "score": log.cheating_score,
+                "evidence_level": log.evidence_level,
+                "frame_captured": log.captured_frame_url is not None
+            }
+            for log in evidence_logs if log.cheating_score >= 75
+        ][:10]  # Latest 10 high-risk events
     }
+
+@router.post("/sessions/{session_id}/update-results")
+async def update_exam_session_results(
+    session_id: str,
+    request_data: Dict,
+    db: Session = Depends(get_db)
+):
+    """Update exam session with comprehensive AI evaluation results from N8N workflow"""
+    
+    try:
+        # Debug logging
+        logger.info(f"🔄 Received AI results for session {session_id}")
+        logger.info(f"📊 Request data keys: {list(request_data.keys())}")
+        
+        # Find the exam session
+        exam_session = db.query(ExamSession).filter(ExamSession.session_id == session_id).first()
+        if not exam_session:
+            logger.error(f"❌ Session {session_id} not found")
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        
+        logger.info(f"✅ Found session {session_id} (DB ID: {exam_session.id})")
+        
+        # Parse existing suspicious_activities
+        existing_activities = {}
+        if exam_session.suspicious_activities:
+            try:
+                if isinstance(exam_session.suspicious_activities, str):
+                    existing_activities = json.loads(exam_session.suspicious_activities)
+                elif isinstance(exam_session.suspicious_activities, dict):
+                    existing_activities = exam_session.suspicious_activities
+                logger.info(f"📋 Existing activities keys: {list(existing_activities.keys())}")
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse existing suspicious_activities, starting fresh")
+        
+        # Update the activities with AI results
+        updated_activities = existing_activities.copy()
+        
+        # Extract AI results from the request - handle both old and new formats
+        received_ai_results = request_data.get("ai_results", request_data)
+        logger.info(f"🤖 Extracted AI results keys: {list(received_ai_results.keys())}")
+        
+        # Store AI results directly in the suspicious_activities
+        updated_activities["ai_evaluation"] = received_ai_results  # Store AI results directly
+        updated_activities["evaluation_method"] = request_data.get("evaluation_method", "google_ai")
+        updated_activities["ai_evaluation_timestamp"] = request_data.get("timestamp", datetime.utcnow().isoformat())
+        
+        # Update the exam session
+        exam_session.suspicious_activities = json.dumps(updated_activities)
+        
+        # Update session status based on AI results
+        if "status" in received_ai_results:
+            exam_session.status = received_ai_results["status"]
+            logger.info(f"📈 Updated session status to: {received_ai_results['status']}")
+        
+        # Update scores if available
+        if "total_score" in received_ai_results:
+            exam_session.score = received_ai_results["total_score"]
+            logger.info(f"🎯 Updated session score to: {received_ai_results['total_score']}")
+        
+        # Set end time if not already set
+        if not exam_session.end_time:
+            exam_session.end_time = datetime.utcnow()
+        
+        db.commit()
+        logger.info(f"✅ Successfully updated session {session_id} with AI results")
+        
+        return {
+            "status": "success",
+            "message": f"Session {session_id} updated with AI evaluation results",
+            "updated_fields": {
+                "ai_evaluation": bool(received_ai_results),
+                "status": exam_session.status,
+                "score": exam_session.score,
+                "evaluation_method": updated_activities.get("evaluation_method")
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error updating session {session_id}: {str(e)}")
+        import traceback
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update session: {str(e)}")
 
 @router.get("/candidates/{candidate_id}/results")
 async def get_candidate_results(
@@ -1089,6 +1274,14 @@ async def get_candidate_results(
     
     # Get suspicious activities and AI evaluation data
     suspicious_data = exam_session.suspicious_activities or {}
+    
+    # Handle both string (from DB) and dict formats
+    if isinstance(suspicious_data, str):
+        try:
+            suspicious_data = json.loads(suspicious_data)
+        except json.JSONDecodeError:
+            suspicious_data = {}
+    
     ai_evaluation = suspicious_data.get("ai_evaluation", {})
     
     # Enhanced debug logging
@@ -1108,9 +1301,9 @@ async def get_candidate_results(
     
     # Debug the actual suspicious_activities data
     if exam_session.suspicious_activities:
-        print(f"   - Raw suspicious_activities keys: {list(exam_session.suspicious_activities.keys())}")
-        if 'ai_evaluation' in exam_session.suspicious_activities:
-            ai_eval_data = exam_session.suspicious_activities['ai_evaluation']
+        print(f"   - Raw suspicious_activities type: {type(exam_session.suspicious_activities)}")
+        if 'ai_evaluation' in suspicious_data:
+            ai_eval_data = suspicious_data['ai_evaluation']
             print(f"   - AI evaluation data type: {type(ai_eval_data)}")
             if isinstance(ai_eval_data, dict):
                 print(f"   - AI evaluation direct keys: {list(ai_eval_data.keys()) if ai_eval_data else 'Empty dict'}")

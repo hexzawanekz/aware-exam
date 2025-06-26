@@ -144,6 +144,14 @@ class ProctoringLog(Base):
     event_metadata = Column(JSON, nullable=True)  # เพิ่มเติมข้อมูลต่างๆ
     screenshot_url = Column(String(500), nullable=True)
     
+    # Enhanced evidence capture fields
+    evidence_level = Column(String(20), default="low")  # low, medium, high, critical
+    captured_frame_url = Column(String(500), nullable=True)  # URL to captured frame image
+    frame_analysis = Column(JSON, nullable=True)  # Detailed YOLO11 analysis results
+    cheating_score = Column(Float, default=0.0)  # 0-100 score for this specific event
+    ai_evaluation = Column(JSON, nullable=True)  # AI evaluation from N8N
+    processed = Column(Boolean, default=False)  # Whether this evidence has been processed by AI
+    
     exam_session = relationship("ExamSession", back_populates="proctoring_logs")
 
 class Admin(Base):

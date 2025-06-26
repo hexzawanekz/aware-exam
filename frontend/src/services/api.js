@@ -260,6 +260,13 @@ class ApiService {
     });
   }
 
+  async cancelExamSession(sessionId) {
+    return this.request("/api/v1/candidate/cancel-exam-session", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  }
+
   async getAvailableExamTemplates() {
     return this.request("/api/v1/candidate/available-exams");
   }

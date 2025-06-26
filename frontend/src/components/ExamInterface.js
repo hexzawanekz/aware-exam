@@ -76,6 +76,16 @@ const ExamInterface = () => {
     faceAbsence: 0,
   });
 
+  // Evidence capture states
+  const [evidenceCapture, setEvidenceCapture] = useState({
+    totalEvents: 0,
+    highRiskEvents: 0,
+    framesCaptured: 0,
+    lastEvidenceScore: 0,
+    lastEventType: "",
+    evidenceLevel: "low",
+  });
+
   // Debug panel states - ติดตาม activities แบบ real-time
   const [debugActivities, setDebugActivities] = useState({
     tabSwitches: 0,
@@ -952,7 +962,33 @@ const ExamInterface = () => {
 
             console.log("📡 Face detection API call successful");
 
-            const result = response; // API returns data directly
+            const result = response;
+
+            // Update evidence capture state
+            if (result.evidence_capture) {
+              const evidence = result.evidence_capture;
+              setEvidenceCapture((prev) => ({
+                ...prev,
+                lastEvidenceScore: evidence.evidence_score || 0,
+                lastEventType: result.suspicious_activity?.[0] || "normal",
+                evidenceLevel: evidence.evidence_level || "low",
+                framesCaptured: evidence.frame_captured
+                  ? prev.framesCaptured + 1
+                  : prev.framesCaptured,
+                highRiskEvents:
+                  evidence.evidence_score >= 70
+                    ? prev.highRiskEvents + 1
+                    : prev.highRiskEvents,
+                totalEvents: prev.totalEvents + 1,
+              }));
+
+              // Show alert for high evidence
+              if (evidence.threshold_exceeded) {
+                console.warn(
+                  `🚨 HIGH EVIDENCE CAPTURED! Score: ${evidence.evidence_score}% | Level: ${evidence.evidence_level}`
+                );
+              }
+            } // API returns data directly
             setFaceDetectionStatus({
               detected: result.face_detected,
               verified: result.identity_verified || false,
@@ -2239,6 +2275,90 @@ function solution() {
                   >
                     🤖 [YOLO11] Advanced Pose Analysis
                   </Typography>
+
+                  {/* Evidence Capture Status */}
+                  <Box
+                    sx={{
+                      mb: 2,
+                      p: 1.5,
+                      border: "2px solid",
+                      borderColor:
+                        evidenceCapture.evidenceLevel === "critical"
+                          ? "error.main"
+                          : evidenceCapture.evidenceLevel === "high"
+                          ? "warning.main"
+                          : evidenceCapture.evidenceLevel === "medium"
+                          ? "info.main"
+                          : "success.main",
+                      borderRadius: 1,
+                      bgcolor: "background.paper",
+                    }}
+                  >
+                    <Typography
+                      variant="body2"
+                      sx={{ fontWeight: "bold", color: "primary.main", mb: 1 }}
+                    >
+                      📊 สถานะการบันทึกหลักฐาน (Evidence Capture)
+                    </Typography>
+                    <Box
+                      sx={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 0.5,
+                        mb: 1,
+                      }}
+                    >
+                      <Chip
+                        size="small"
+                        label={`คะแนน: ${evidenceCapture.lastEvidenceScore}%`}
+                        color={
+                          evidenceCapture.lastEvidenceScore >= 90
+                            ? "error"
+                            : evidenceCapture.lastEvidenceScore >= 75
+                            ? "warning"
+                            : evidenceCapture.lastEvidenceScore >= 50
+                            ? "info"
+                            : "success"
+                        }
+                        variant="filled"
+                      />
+                      <Chip
+                        size="small"
+                        label={`ระดับ: ${evidenceCapture.evidenceLevel.toUpperCase()}`}
+                        color={
+                          evidenceCapture.evidenceLevel === "critical"
+                            ? "error"
+                            : evidenceCapture.evidenceLevel === "high"
+                            ? "warning"
+                            : evidenceCapture.evidenceLevel === "medium"
+                            ? "info"
+                            : "success"
+                        }
+                        variant="outlined"
+                      />
+                      <Chip
+                        size="small"
+                        label={`📸 ${evidenceCapture.framesCaptured}`}
+                        color="primary"
+                        variant="outlined"
+                      />
+                      <Chip
+                        size="small"
+                        label={`🚨 ${evidenceCapture.highRiskEvents}`}
+                        color="error"
+                        variant="outlined"
+                      />
+                    </Box>
+                    {evidenceCapture.lastEventType !== "normal" &&
+                      evidenceCapture.lastEventType && (
+                        <Typography
+                          variant="caption"
+                          sx={{ color: "warning.main", fontWeight: "bold" }}
+                        >
+                          เหตุการณ์ล่าสุด: {evidenceCapture.lastEventType}
+                        </Typography>
+                      )}
+                  </Box>
 
                   {/* Main Analysis Row */}
                   <Box

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 import json
@@ -169,6 +169,14 @@ async def submit_exam(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to submit exam: {str(e)}")
+
+# Add JSON response with UTF-8 encoding
+@app.middleware("http")
+async def ensure_utf8_response(request, call_next):
+    response = await call_next(request)
+    if hasattr(response, 'headers') and response.headers.get('content-type', '').startswith('application/json'):
+        response.charset = 'utf-8'
+    return response
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) 
