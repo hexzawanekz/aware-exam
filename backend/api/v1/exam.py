@@ -1031,24 +1031,15 @@ async def update_exam_results(
     if not session.suspicious_activities:
         session.suspicious_activities = {}
     
-    # Merge AI evaluation results with existing data
-    session.suspicious_activities.update({
-        "ai_evaluation": {
-            "total_score": ai_results.get("total_score", 0),
-            "status": ai_results.get("status", "failed"),
-            "multiple_choice_score": ai_results.get("multiple_choice_score", {}),
-            "coding_scores": ai_results.get("coding_scores", []),
-            "criteria_analysis": ai_results.get("criteria_analysis", {}),
-            "overall_feedback": ai_results.get("overall_feedback", ""),
-            "recommendation": ai_results.get("recommendation", ""),
-            "detailed_analysis": ai_results.get("detailed_analysis", {}),
-            "score_breakdown": ai_results.get("score_breakdown", {}),
-            "evaluation_metadata": ai_results.get("evaluation_metadata", {})
-        },
-        "evaluation_method": evaluation_method,
-        "last_updated": datetime.utcnow().isoformat(),
-        "ai_processing_timestamp": results_data.get("timestamp", datetime.utcnow().isoformat())
-    })
+    # Create a NEW dictionary to force SQLAlchemy to detect the change (JSON field tracking issue)
+    updated_activities = dict(session.suspicious_activities) if session.suspicious_activities else {}
+    updated_activities["ai_evaluation"] = ai_results  # Store AI results directly
+    updated_activities["evaluation_method"] = evaluation_method
+    updated_activities["last_updated"] = datetime.utcnow().isoformat()
+    updated_activities["ai_processing_timestamp"] = results_data.get("timestamp", datetime.utcnow().isoformat())
+    
+    # Reassign the entire field to force SQLAlchemy change detection
+    session.suspicious_activities = updated_activities
     
     db.commit()
     
@@ -1100,17 +1091,33 @@ async def get_candidate_results(
     suspicious_data = exam_session.suspicious_activities or {}
     ai_evaluation = suspicious_data.get("ai_evaluation", {})
     
-    # Debug logging
+    # Enhanced debug logging
     print(f"🔍 Debug - Candidate {candidate_id} AI evaluation check:")
     print(f"   - Has suspicious_data: {bool(suspicious_data)}")
+    if suspicious_data:
+        print(f"   - Suspicious data keys: {list(suspicious_data.keys())}")
+        print(f"   - Evaluation method: {suspicious_data.get('evaluation_method')}")
     print(f"   - Has ai_evaluation: {bool(ai_evaluation)}")
     if ai_evaluation:
         print(f"   - AI evaluation keys: {list(ai_evaluation.keys())}")
-        if ai_evaluation.get("ai_results"):
-            print(f"   - Has ai_results structure")
         if ai_evaluation.get("total_score"):
             print(f"   - Has direct total_score: {ai_evaluation.get('total_score')}")
+        if ai_evaluation.get("evaluation_metadata"):
+            print(f"   - Has evaluation_metadata: {ai_evaluation.get('evaluation_metadata')}")
     print(f"   - Session ID: {exam_session.session_id}")
+    
+    # Debug the actual suspicious_activities data
+    if exam_session.suspicious_activities:
+        print(f"   - Raw suspicious_activities keys: {list(exam_session.suspicious_activities.keys())}")
+        if 'ai_evaluation' in exam_session.suspicious_activities:
+            ai_eval_data = exam_session.suspicious_activities['ai_evaluation']
+            print(f"   - AI evaluation data type: {type(ai_eval_data)}")
+            if isinstance(ai_eval_data, dict):
+                print(f"   - AI evaluation direct keys: {list(ai_eval_data.keys()) if ai_eval_data else 'Empty dict'}")
+            else:
+                print(f"   - AI evaluation data: {str(ai_eval_data)[:100]}...")
+    else:
+        print(f"   - No suspicious_activities data found")
     
     # Prepare AI-generated results or fallback data
     # Check if we have AI evaluation data (either from real workflow or inserted data)

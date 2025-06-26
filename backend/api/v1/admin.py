@@ -732,6 +732,7 @@ async def generate_ai_exam_template(
         # Check if N8N workflow was successful
         if not result or not result.get("success"):
             logger.error("❌ N8N workflow failed")
+            logger.error(f"❌ N8N result: {result}")
             db.delete(draft_exam)
             db.commit()
             
@@ -1102,8 +1103,7 @@ async def update_exam_with_questions(
             exam_template.exam_metadata = new_metadata
         
         # Activate the exam (no longer draft)
-        if update_data.get("is_active", True):
-            exam_template.is_active = True
+        exam_template.is_active = update_data.get("is_active", True)
         
         # Update timestamp
         exam_template.updated_at = datetime.utcnow()
@@ -1205,6 +1205,11 @@ async def update_exam_with_criteria_questions(
         
         # Update exam template
         exam_template.questions = processed_questions
+        
+        # Handle is_active field - activate exam when questions are added successfully
+        if "is_active" in update_data:
+            exam_template.is_active = update_data.get("is_active", True)
+            logger.info(f"🔄 Setting exam {exam_id} is_active = {exam_template.is_active}")
         
         # Update metadata with criteria analysis
         existing_metadata = exam_template.exam_metadata or {}
