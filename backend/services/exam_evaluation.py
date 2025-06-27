@@ -22,41 +22,126 @@ class ExamEvaluationService:
             if not session:
                 raise ValueError(f"Exam session {session_id} not found")
             
+            # Check if AI evaluation already exists (from N8N update-results call)
+            logger.info(f"🔍 [DEBUG] Checking for existing AI evaluation in session {session_id}")
+            logger.info(f"🔍 [DEBUG] session.suspicious_activities exists: {bool(session.suspicious_activities)}")
+            
+            existing_ai_evaluation = None
+            if session.suspicious_activities:
+                try:
+                    logger.info(f"🔍 [DEBUG] suspicious_activities type: {type(session.suspicious_activities)}")
+                    
+                    if isinstance(session.suspicious_activities, str):
+                        activities_data = json.loads(session.suspicious_activities)
+                        logger.info(f"🔍 [DEBUG] Parsed JSON from string")
+                    else:
+                        activities_data = session.suspicious_activities
+                        logger.info(f"🔍 [DEBUG] Using dict directly")
+                    
+                    logger.info(f"🔍 [DEBUG] activities_data keys: {list(activities_data.keys()) if activities_data else 'None'}")
+                    
+                    existing_ai_evaluation = activities_data.get("ai_evaluation")
+                    logger.info(f"🔍 [DEBUG] existing_ai_evaluation found: {bool(existing_ai_evaluation)}")
+                    
+                    if existing_ai_evaluation:
+                        logger.info(f"✅ Found existing AI evaluation for session {session_id}, skipping N8N workflow")
+                        return {
+                            "success": True,
+                            "message": "Exam evaluation already completed by N8N",
+                            "session_id": session_id,
+                            "evaluation_method": "ai_already_processed"
+                        }
+                    else:
+                        logger.warning(f"⚠️ [DEBUG] No ai_evaluation key found in activities_data")
+                        
+                except (json.JSONDecodeError, AttributeError) as e:
+                    logger.error(f"❌ [DEBUG] Error parsing existing activities: {e}")
+            else:
+                logger.warning(f"⚠️ [DEBUG] No suspicious_activities found in session")
+            
             # Prepare evaluation data for Google AI
             evaluation_data = await self._prepare_evaluation_data(session, db)
             
             # Trigger N8N workflow for evaluation with enhanced data
+            logger.info(f"🚀 [DEBUG] Triggering N8N workflow for session {session_id}")
             workflow_result = await self._trigger_evaluation_workflow(session_id, evaluation_data)
             
             if workflow_result.get("success"):
-                logger.info(f"Exam evaluation completed successfully for session {session_id}")
+                logger.info(f"✅ [DEBUG] N8N workflow triggered successfully for session {session_id}")
                 
-                # Update session with AI results if available
-                if "ai_results" in workflow_result:
-                    await self._update_session_with_ai_results(session, workflow_result["ai_results"], db)
+                # Wait for N8N to process and call update-results (give it time to complete)
+                import asyncio
+                logger.info(f"⏳ [DEBUG] Waiting for N8N to complete AI evaluation...")
+                await asyncio.sleep(10)  # Wait 10 seconds for N8N to complete
                 
+                # Refresh session to check for AI results
+                db.refresh(session)
+                
+                # Check again for AI evaluation after N8N processing
+                if session.suspicious_activities:
+                    try:
+                        if isinstance(session.suspicious_activities, str):
+                            activities_data = json.loads(session.suspicious_activities)
+                        else:
+                            activities_data = session.suspicious_activities
+                        
+                        ai_evaluation = activities_data.get("ai_evaluation")
+                        if ai_evaluation and activities_data.get("evaluation_method") == "cost_optimized_ai":
+                            logger.info(f"✅ [DEBUG] AI evaluation completed by N8N for session {session_id}")
+                            return {
+                                "success": True,
+                                "message": "Exam evaluation completed successfully by N8N",
+                                "session_id": session_id,
+                                "evaluation_method": "n8n_ai_completed"
+                            }
+                    except Exception as e:
+                        logger.error(f"❌ [DEBUG] Error checking AI results after N8N: {e}")
+                
+                # If still no AI results, return success but note that N8N is processing
+                logger.warning(f"⚠️ [DEBUG] N8N triggered but AI results not yet available for session {session_id}")
                 return {
                     "success": True,
-                    "message": "Exam evaluation completed successfully",
+                    "message": "N8N workflow triggered successfully, AI evaluation in progress",
                     "session_id": session_id,
-                    "evaluation_results": workflow_result
+                    "evaluation_method": "n8n_processing"
                 }
             else:
-                # Fallback to local evaluation if N8N fails
-                logger.warning(f"N8N workflow failed for session {session_id}, using fallback evaluation")
-                return await self._fallback_evaluation(session, db)
+                # N8N workflow failed to start - just return error, don't use fallback
+                logger.error(f"❌ [DEBUG] N8N workflow failed to start for session {session_id}")
+                logger.error(f"❌ [DEBUG] workflow_result: {workflow_result}")
+                logger.error(f"❌ [DEBUG] Returning error instead of fallback to prevent data overwrite")
                 
-        except Exception as e:
-            logger.error(f"Error processing exam completion: {str(e)}")
-            # Fallback evaluation
-            session = db.query(ExamSession).filter(ExamSession.session_id == session_id).first()
-            if session:
-                return await self._fallback_evaluation(session, db)
-            else:
                 return {
                     "success": False,
-                    "message": f"Failed to process exam completion: {str(e)}"
+                    "message": "N8N workflow failed to start - AI evaluation not available",
+                    "session_id": session_id,
+                    "debug_info": {
+                        "reason": "N8N workflow failed to start",
+                        "workflow_result": workflow_result,
+                        "session_id": session_id
+                    }
                 }
+                
+        except Exception as e:
+            logger.error(f"❌ [DEBUG] Exception in process_exam_completion: {str(e)}")
+            logger.error(f"❌ [DEBUG] Exception type: {type(e)}")
+            import traceback
+            logger.error(f"❌ [DEBUG] Traceback: {traceback.format_exc()}")
+            
+            # TEMPORARY: Re-raise the exception to see what's happening
+            # raise e
+            
+            # Return error instead of fallback to prevent data overwrite
+            return {
+                "success": False,
+                "message": f"Failed to process exam completion: {str(e)}",
+                "debug_info": {
+                    "reason": "Exception in process_exam_completion",
+                    "exception": str(e),
+                    "exception_type": str(type(e)),
+                    "session_id": session_id
+                }
+            }
     
     async def _prepare_evaluation_data(self, session: ExamSession, db: Session) -> Dict[str, Any]:
         """Prepare comprehensive evaluation data for Google AI"""
@@ -367,9 +452,24 @@ class ExamEvaluationService:
                 "evaluation_timestamp": datetime.utcnow().isoformat()
             }
             
-            if not session.suspicious_activities:
-                session.suspicious_activities = {}
-            session.suspicious_activities.update(evaluation_data)
+            # Parse existing activities to preserve AI evaluation data
+            existing_activities = {}
+            if session.suspicious_activities:
+                if isinstance(session.suspicious_activities, str):
+                    try:
+                        existing_activities = json.loads(session.suspicious_activities)
+                    except json.JSONDecodeError:
+                        existing_activities = {}
+                elif isinstance(session.suspicious_activities, dict):
+                    existing_activities = session.suspicious_activities.copy()
+            
+            # Only update if we don't already have AI evaluation data
+            if not existing_activities.get("ai_evaluation"):
+                existing_activities.update(evaluation_data)
+                session.suspicious_activities = json.dumps(existing_activities, ensure_ascii=False)
+                logger.info(f"✅ Applied fallback evaluation for session {session.session_id}")
+            else:
+                logger.info(f"🔄 Preserved existing AI evaluation data for session {session.session_id}")
             
             db.commit()
             

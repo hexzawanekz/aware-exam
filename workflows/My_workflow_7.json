@@ -1,0 +1,989 @@
+{
+  "name": "My workflow 7",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-exam-with-criteria",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "46b60b08-d583-4aed-a24a-c281f823235f",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -1200,
+        -900
+      ],
+      "webhookId": "generate-exam-with-criteria"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/v1/admin/exam-templates/save-draft",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  name: \"AI Exam with Criteria - \" + ($input.first().json.body.programmingLanguage || \"JavaScript\") + \" (\" + ($input.first().json.body.difficultyLevel || \"junior\") + \")\",\n  description: \"AI-generated exam with criteria analysis for \" + ($input.first().json.body.programmingLanguage || \"JavaScript\") + \" at \" + ($input.first().json.body.difficultyLevel || \"junior\") + \" level\",\n  programming_language: $input.first().json.body.programmingLanguage || \"JavaScript\",\n  duration_minutes: $input.first().json.body.examDuration || 30,\n  position_id: 1,\n  metadata: {\n    config: {\n      company_name: $input.first().json.body.company_name,\n      department_name: $input.first().json.body.department_name,\n      position_name: $input.first().json.body.position_name,\n      programming_language: $input.first().json.body.programmingLanguage,\n      difficulty_level: $input.first().json.body.difficultyLevel,\n      multiple_choice_count: $input.first().json.body.multipleChoiceCount,\n      coding_question_count: $input.first().json.body.codingQuestionCount,\n      exam_duration: $input.first().json.body.examDuration,\n      enable_criteria_analysis: true\n    }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "f48333ba-93e1-4255-b603-785b33c70cee",
+      "name": "Save Draft Exam",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -980,
+        -900
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=AIzaSyCf_LcAwCSeSV7qYYATtHY-0MF8fVGr4xw",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.requestBody }}",
+        "options": {}
+      },
+      "id": "d87b170e-04dd-46a4-b3ed-125180a7c404",
+      "name": "Google AI Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -620,
+        -900
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the AI-generated response and prepare for database update\nconst webhookData = $node['Webhook Trigger'].json;\nconst draftData = $node['Save Draft Exam'].json;\nconst googleResponse = $node['Google AI Request'].json;\n\n// Extract the AI-generated text\nconst aiText = googleResponse.candidates[0].content.parts[0].text;\n\n// DEBUG: Log the raw AI response\nconsole.log(\"=== AI RESPONSE DEBUG ===\");\nconsole.log(\"Raw AI Text:\", aiText);\nconsole.log(\"AI Text Length:\", aiText.length);\nconsole.log(\"=== END DEBUG ===\");\n\n// Parse the AI response to extract JSON with multiple strategies\nlet aiQuestions;\ntry {\n  // Strategy 1: Remove all markdown code blocks\n  let cleanText = aiText.replace(/```json\\s*\\n?|```\\s*\\n?/g, '').trim();\n  \n  // Strategy 2: Find JSON between curly braces\n  const jsonMatch = cleanText.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    cleanText = jsonMatch[0];\n  }\n  \n  // Strategy 3: Remove any leading/trailing text that's not JSON\n  const lines = cleanText.split('\\n');\n  let jsonStart = -1;\n  let jsonEnd = -1;\n  \n  for (let i = 0; i < lines.length; i++) {\n    if (lines[i].trim().startsWith('{') && jsonStart === -1) {\n      jsonStart = i;\n    }\n    if (lines[i].trim().endsWith('}')) {\n      jsonEnd = i;\n    }\n  }\n  \n  if (jsonStart !== -1 && jsonEnd !== -1) {\n    cleanText = lines.slice(jsonStart, jsonEnd + 1).join('\\n');\n  }\n  \n  // DEBUG: Log the cleaned text\n  console.log(\"=== PARSING DEBUG ===\");\n  console.log(\"Cleaned Text:\", cleanText.substring(0, 500) + (cleanText.length > 500 ? '...' : ''));\n  console.log(\"Cleaned Text Length:\", cleanText.length);\n  \n  // Try to parse\n  aiQuestions = JSON.parse(cleanText);\n  \n  // Validate the parsed data\n  if (!aiQuestions.questions || !Array.isArray(aiQuestions.questions) || aiQuestions.questions.length === 0) {\n    throw new Error(\"No valid questions array found in AI response\");\n  }\n  \n  // DEBUG: Log successful parsing\n  console.log(\"=== PARSING SUCCESS ===\");\n  console.log(\"Parsed Questions Count:\", aiQuestions.questions.length);\n  console.log(\"Questions Summary:\", aiQuestions.questions.map(q => ({ type: q.type, criteria: q.Criteria, points: q.points })));\n  \n} catch (error) {\n  // DEBUG: Log parsing error\n  console.log(\"=== PARSING ERROR ===\");\n  console.log(\"Error Message:\", error.message);\n  console.log(\"First 500 chars of AI text:\", aiText.substring(0, 500));\n  console.log(\"Last 200 chars of AI text:\", aiText.substring(Math.max(0, aiText.length - 200)));\n  console.log(\"=== CREATING FALLBACK ===\");\n  \n  // Create fallback questions based on request parameters\n  const requestData = webhookData.body || webhookData;\n  const mcCount = requestData.multipleChoiceCount || 2;\n  const codingCount = requestData.codingQuestionCount || 3;\n  const totalQuestions = mcCount + codingCount;\n  const mcPoints = Math.floor(40 / mcCount); // 40% of points to MC\n  const codingPoints = Math.floor(60 / codingCount); // 60% of points to coding\n  \n  const fallbackQuestions = [];\n  \n  // Create multiple choice questions\n  for (let i = 0; i < mcCount; i++) {\n    fallbackQuestions.push({\n      type: \"multiple_choice\",\n      Criteria: `Basic ${requestData.programmingLanguage || 'PHP'} Knowledge ${i + 1}`,\n      question: `What is a key concept in ${requestData.programmingLanguage || 'PHP'} programming? (Question ${i + 1})`,\n      options: [\"Concept A\", \"Concept B\", \"Concept C\", \"Concept D\"],\n      correct_answer: \"Concept A\",\n      points: mcPoints\n    });\n  }\n  \n  // Create coding questions\n  for (let i = 0; i < codingCount; i++) {\n    fallbackQuestions.push({\n      type: \"coding\",\n      Criteria: `${requestData.programmingLanguage || 'PHP'} Implementation Skills ${i + 1}`,\n      question: `Write a ${requestData.programmingLanguage || 'PHP'} function to solve a basic problem (Question ${i + 1})`,\n      expected_output: `function solution${i + 1}() { return 'implementation'; }`,\n      sample_input: \"solution${i + 1}()\",\n      sample_output: \"'implementation'\",\n      points: codingPoints\n    });\n  }\n  \n  aiQuestions = {\n    exam_id: draftData.id,\n    questions: fallbackQuestions,\n    error: \"Failed to parse AI response: \" + error.message,\n    raw_ai_response: aiText.substring(0, 1000) // Limit size\n  };\n}\n\n// Ensure exam_id is included\nif (!aiQuestions.exam_id) {\n  aiQuestions.exam_id = draftData.id;\n}\n\n// Validate and enhance questions\nif (aiQuestions.questions) {\n  aiQuestions.questions = aiQuestions.questions.map((q, index) => {\n    // Ensure Criteria field exists\n    if (!q.Criteria) {\n      if (q.type === 'coding') {\n        q.Criteria = \"Programming Implementation Skills\";\n      } else if (q.question && q.question.toLowerCase().includes('syntax')) {\n        q.Criteria = \"Language Syntax Knowledge\";\n      } else if (q.question && q.question.toLowerCase().includes('function')) {\n        q.Criteria = \"Function and Method Understanding\";\n      } else {\n        q.Criteria = \"Core Programming Concepts\";\n      }\n    }\n    \n    // Ensure points field exists\n    if (!q.points || q.points === 0) {\n      q.points = q.type === 'coding' ? 20 : 10;\n    }\n    \n    return q;\n  });\n}\n\n// DEBUG: Log final payload\nconsole.log(\"=== FINAL PAYLOAD DEBUG ===\");\nconsole.log(\"Final Questions Count:\", aiQuestions.questions ? aiQuestions.questions.length : 0);\nconsole.log(\"Total Points:\", aiQuestions.questions ? aiQuestions.questions.reduce((sum, q) => sum + (q.points || 0), 0) : 0);\nconsole.log(\"Question Types:\", aiQuestions.questions ? aiQuestions.questions.map(q => q.type) : []);\n\n// Prepare the update payload\nconst updatePayload = {\n  exam_id: draftData.id,\n  questions: aiQuestions.questions || [],\n  metadata: {\n    ai_generation: {\n      model: googleResponse.modelVersion || \"gemini-1.5-flash\",\n      tokens_used: googleResponse.usageMetadata?.totalTokenCount || 0,\n      response_id: googleResponse.responseId || \"unknown\",\n      generation_time: new Date().toISOString(),\n      raw_response: aiText.substring(0, 2000), // Limit raw response size\n      criteria_enabled: true,\n      parsing_success: !aiQuestions.error\n    },\n    status: \"completed\"\n  }\n};\n\nreturn [{\n  json: updatePayload\n}];"
+      },
+      "id": "5b2768be-a0d8-43de-9a95-cce2df2d303f",
+      "name": "Process AI Response with Criteria",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -300,
+        -1140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://host.docker.internal:8000/api/v1/admin/exam-templates/{{ $json.exam_id }}/update-with-criteria-questions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(Object.assign($json, { is_active: true })) }}",
+        "options": {}
+      },
+      "id": "1e84ce49-2f9d-4794-aee9-5a79a94a51cd",
+      "name": "Update Exam with Questions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -180,
+        -900
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  success: true,\n  message: \"AI exam generated successfully\",\n  exam_id: $json.exam_id || 'unknown',\n  questions_generated: ($json.questions || []).length,\n  workflow_version: \"v6-fixed\",\n  timestamp: new Date().toISOString()\n} }}",
+        "options": {}
+      },
+      "id": "bdc91ede-23f4-4f8d-bb15-166f8665bc00",
+      "name": "Send Response with Criteria",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        100,
+        -900
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"success\": false,\n  \"error\": \"Failed to save draft exam\",\n  \"message\": \"Could not create initial exam record\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "a9600ff1-cacc-4836-8fd1-b43db5c2ab52",
+      "name": "Error - Draft Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -920,
+        -580
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"success\": false,\n  \"error\": \"Google AI request failed\",\n  \"message\": \"Could not generate questions using AI\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "123518a3-2644-4c89-b34d-12f8eea96ede",
+      "name": "Error - AI Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -540,
+        -580
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"success\": false,\n  \"error\": \"Failed to update exam with questions\",\n  \"message\": \"Questions generated but database update failed\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "ca627af4-be61-46eb-be75-fcd6c8eb493d",
+      "name": "Error - Update Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -120,
+        -580
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get data from previous nodes\nconst draftData = $node['Save Draft Exam'].json;\nconst webhookData = $node['Webhook Trigger'].json;\n\nconsole.log(\"Draft data:\", JSON.stringify(draftData, null, 2));\nconsole.log(\"Webhook data:\", JSON.stringify(webhookData, null, 2));\n\n// Access webhook body data correctly\nconst requestData = webhookData.body || webhookData;\n\nconsole.log(\"Request data:\", JSON.stringify(requestData, null, 2));\n\n// Build the enhanced Google AI request body with AI-determined criteria\nconst requestBody = {\n  contents: [\n    {\n      parts: [\n        {\n          text: `Please create ${requestData.multipleChoiceCount || 2} multiple choice questions and ${requestData.codingQuestionCount || 2} coding questions for ${requestData.programmingLanguage || 'PHP'} exam at ${requestData.difficultyLevel || 'junior'} level.\n\nFor each question, you should decide:\n1. What specific skill or knowledge area you want to measure (\"Criteria\" field)\n2. How many points this question should be worth (\"points\" field)\n3. Think about what's most important to test for a ${requestData.programmingLanguage || 'PHP'} developer at ${requestData.difficultyLevel || 'junior'} level\n\nIMPORTANT REQUIREMENTS:\n1. You MUST include this exam_id in your response: ${draftData.id}\n2. Each question MUST have a \"Criteria\" field that describes what skill/knowledge you are testing\n3. Each question MUST have a \"points\" field with the score value for that question\n4. The total points of ALL questions MUST equal exactly 100 points\n5. Assign points based on question difficulty and importance (coding questions typically worth more than multiple choice)\n6. Create your own criteria based on what you think is important to measure\n7. Make the criteria specific and educational (e.g., \"Array Manipulation Skills\", \"Object-Oriented Design Principles\", \"Error Handling Best Practices\")\n8. Ensure questions cover different aspects of ${requestData.programmingLanguage || 'PHP'} programming\n9. Make sure questions are appropriate for ${requestData.difficultyLevel || 'junior'} level\n\nRespond with ONLY valid JSON in this EXACT format:\n{\n  \"exam_id\": ${draftData.id},\n  \"questions\": [\n    {\n      \"type\": \"multiple_choice\",\n      \"Criteria\": \"Core PHP Syntax Knowledge\",\n      \"question\": \"Which of the following is used to define a block of code in PHP?\",\n      \"options\": [\"Parentheses ( )\", \"Curly braces { }\", \"Square brackets [ ]\", \"Angle brackets < >\"],\n      \"correct_answer\": \"Curly braces { }\",\n      \"points\": 5\n    },\n    {\n      \"type\": \"multiple_choice\",\n      \"Criteria\": \"Variable Declaration and Usage\",\n      \"question\": \"How do you declare a variable in PHP?\",\n      \"options\": [\"var $variable\", \"$variable\", \"variable $\", \"declare $variable\"],\n      \"correct_answer\": \"$variable\",\n      \"points\": 5\n    },\n    {\n      \"type\": \"coding\",\n      \"Criteria\": \"Function Implementation Skills\",\n      \"question\": \"Write a PHP function that takes two numbers and returns their sum\",\n      \"expected_output\": \"function addNumbers($a, $b) {\\n    return $a + $b;\\n}\",\n      \"sample_input\": \"addNumbers(3, 5)\",\n      \"sample_output\": \"8\",\n      \"points\": 15\n    },\n    {\n      \"type\": \"coding\",\n      \"Criteria\": \"Array Processing and Logic\",\n      \"question\": \"Write a PHP function to find the maximum number in an array\",\n      \"expected_output\": \"function findMax($numbers) {\\n    return max($numbers);\\n}\",\n      \"sample_input\": \"findMax([1, 5, 3, 9, 2])\",\n      \"sample_output\": \"9\",\n      \"points\": 25\n    }\n  ]\n}\n\nPlease generate exactly ${requestData.multipleChoiceCount || 2} multiple choice and ${requestData.codingQuestionCount || 2} coding questions.\nFor each question:\n- Create a meaningful \"Criteria\" that describes what skill you're testing\n- Assign appropriate \"points\" based on difficulty and importance\n- Make sure the total points add up to exactly 100\n- Coding questions should typically be worth more points than multiple choice\n- Consider the complexity and time required for each question when assigning points\nFor coding questions, include sample_input and sample_output when applicable.\n\nIMPORTANT: Double-check that all question points sum to exactly 100!`\n        }\n      ]\n    }\n  ],\n  generationConfig: {\n    temperature: 0.8,\n    maxOutputTokens: 4000\n  }\n};\n\nreturn [{ json: { requestBody } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -700,
+        -1140
+      ],
+      "id": "0c76a2cc-37f5-4aaf-ae56-bf33a2eb3f40",
+      "name": "Enhanced Code with Criteria"
+    },
+    {
+      "parameters": {
+        "content": "Smart Exam Generation with Gemini",
+        "height": 820,
+        "width": 1760
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1280,
+        -1200
+      ],
+      "typeVersion": 1,
+      "id": "97b37403-d95a-4c27-9874-412496529f56",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "Fallback Handling",
+        "height": 220,
+        "width": 1160,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1000,
+        -640
+      ],
+      "typeVersion": 1,
+      "id": "59fc825e-f115-47d1-916d-e61a96225713",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "API Section",
+        "height": 200,
+        "width": 1160,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1000,
+        -940
+      ],
+      "typeVersion": 1,
+      "id": "7120e224-7970-4c85-ad56-25cf0ff5d370",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "Data Format Consistency",
+        "height": 180,
+        "width": 1160,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1000,
+        -1160
+      ],
+      "typeVersion": 1,
+      "id": "91599b45-26a8-434f-ad14-e8923c40a166",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "Coding Exam - google AI Evaluate score",
+        "height": 720,
+        "width": 1760
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1280,
+        -260
+      ],
+      "typeVersion": 1,
+      "id": "34a7e94d-75dd-46c4-b6aa-e2e249f09313",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "Data Format Consistency",
+        "height": 200,
+        "width": 1320,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1040,
+        -220
+      ],
+      "typeVersion": 1,
+      "id": "4d830cd6-1ef2-4385-8070-6b627b3d13d1",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "content": "API Section",
+        "height": 200,
+        "width": 1120,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -840,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "8e5765fa-0e68-4cb9-86a0-c9bc16bb1d73",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "Fallback Handling",
+        "height": 180,
+        "width": 1120,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -840,
+        220
+      ],
+      "typeVersion": 1,
+      "id": "e0254860-51db-4317-9919-7d4a9d84956f",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "exam-complete",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "2958bb3d-a96b-4dcc-90d4-21ebbe36bba1",
+      "name": "Webhook - Exam Complete",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -1200,
+        40
+      ],
+      "webhookId": "exam-complete"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cost-optimized preparation - MC scores saved first, minimal AI prompt for coding only\nconst inputData = $input.first().json;\n\n// Handle N8N webhook data structure - data can be in body or directly in json\nconst webhookData = inputData.body || inputData;\nconst sessionId = webhookData.session_id; // Extract session_id from webhook body\nconst evaluationData = webhookData.evaluation_data || {};\n\n// Log the incoming data for debugging\nconsole.log('🔍 Input Data Keys:', Object.keys(inputData));\nconsole.log('🔍 Webhook Data Keys:', Object.keys(webhookData));\nconsole.log('📋 Session ID:', sessionId);\nconsole.log('📊 Evaluation Data Keys:', Object.keys(evaluationData));\n\nif (!sessionId) {\n  console.error('❌ Session ID not found. Full input data:', JSON.stringify(inputData, null, 2));\n  throw new Error('❌ Missing session_id in webhook payload');\n}\n\n// Extract evaluation data\nconst multipleChoiceScore = evaluationData.multiple_choice_score || {};\nconst codingQuestions = evaluationData.coding_questions || [];\n\n// Prepare multiple choice summary (already calculated)\nconst mcSummary = {\n  total_questions: multipleChoiceScore.mc_questions ? multipleChoiceScore.mc_questions.length : 0,\n  correct_answers: multipleChoiceScore.mc_questions ? multipleChoiceScore.mc_questions.filter(q => q.is_correct).length : 0,\n  score: multipleChoiceScore.total_mc_score || 0,\n  max_score: multipleChoiceScore.max_mc_score || 0,\n  percentage: multipleChoiceScore.mc_percentage || 0,\n  criteria_breakdown: multipleChoiceScore.criteria_breakdown || {}\n};\n\n// Filter only coding questions that have user answers for AI evaluation\nconst codingForAI = codingQuestions.filter(q => {\n  const hasAnswer = q.user_answer && q.user_answer.trim().length > 0;\n  if (!hasAnswer) {\n    console.log(`Skipping coding question ${q.id} - no answer provided`);\n  }\n  return hasAnswer;\n}).map(q => ({\n  id: q.id,\n  question: q.question,\n  description: q.description || '',\n  Criteria: q.criteria || q.Criteria || \"Programming Skills\",\n  points: q.points,\n  sample_input: q.sample_input || '',\n  sample_output: q.sample_output || '',\n  programming_language: q.programming_language,\n  user_answer: q.user_answer\n}));\n\n// Calculate total coding points\nconst totalCodingPoints = codingQuestions.reduce((sum, q) => sum + (q.points || 0), 0);\nconst answeredCodingPoints = codingForAI.reduce((sum, q) => sum + (q.points || 0), 0);\n\n// MINIMAL AI prompt for CODING EVALUATION ONLY (cost-optimized)\nconst aiPrompt = `Evaluate JavaScript coding questions. Return JSON only.\n\n**EXAM INFO:**\n- Candidate: ${evaluationData.candidate_info?.candidate_name || 'Unknown'}\n- Language: ${evaluationData.exam_template?.programming_language || 'JavaScript'}\n\n**CODING QUESTIONS (${codingForAI.length} to evaluate):**\n${codingForAI.map((q, index) => `\n${index + 1}. **${q.Criteria}** (${q.points} points)\nProblem: ${q.question}\n${q.description ? `Description: ${q.description}` : ''}\n${q.sample_input ? `Input: ${q.sample_input}` : ''}\n${q.sample_output ? `Output: ${q.sample_output}` : ''}\n\nCandidate Answer:\n\\`\\`\\`javascript\n${q.user_answer}\n\\`\\`\\`\n`).join('\\n')}\n\n**EVALUATION REQUIRED:**\nReturn JSON with exact structure:\n{\n  \"coding_scores\": [\n    {\n      \"question_id\": \"string\",\n      \"Criteria\": \"string\",\n      \"score\": number,\n      \"max_score\": number,\n      \"feedback\": \"string in Thai\",\n      \"strengths\": [\"string\"],\n      \"improvements\": [\"string\"]\n    }\n  ],\n  \"overall_feedback\": \"string in Thai\",\n  \"recommendation\": \"string in Thai\"\n}\n\n**SCORING:**\n- Evaluate correctness, logic, code quality\n- Give partial credit appropriately\n- Feedback in Thai language\n- Be fair but thorough`;\n\n// Minimal request body for Google AI\nconst requestBody = {\n  contents: [\n    {\n      parts: [\n        {\n          text: aiPrompt\n        }\n      ]\n    }\n  ],\n  generationConfig: {\n    temperature: 0.2,\n    maxOutputTokens: 2000\n  }\n};\n\nconsole.log('✅ Prepared data for session:', sessionId);\nconsole.log('📊 MC Score:', mcSummary.score, '/', mcSummary.max_score);\nconsole.log('💻 Coding questions to evaluate:', codingForAI.length);\n\nreturn [{\n  json: {\n    session_id: sessionId,\n    requestBody: requestBody,\n    mc_score: mcSummary.score,\n    mc_max_score: mcSummary.max_score,\n    mc_percentage: mcSummary.percentage,\n    coding_max_score: totalCodingPoints,\n    answered_coding_max_score: answeredCodingPoints,\n    total_max_score: mcSummary.max_score + totalCodingPoints,\n    evaluation_data: evaluationData,\n    coding_questions_count: codingForAI.length,\n    total_coding_questions: codingQuestions.length,\n    mc_criteria_breakdown: mcSummary.criteria_breakdown,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "cb54a60e-4e3c-4bf0-88c2-7076ccf37714",
+      "name": "Prepare Coding-Only AI Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -740,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8000/api/v1/exam/sessions/{{ $json.session_id }}/update-results",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  session_id: $json.session_id,\n  ai_results: {\n    total_score: Math.round(($json.mc_score / $json.total_max_score) * 100),\n    status: \"processing_coding\",\n    multiple_choice_score: {\n      score: $json.mc_score,\n      max_score: $json.mc_max_score,\n      percentage: $json.mc_percentage,\n      criteria_breakdown: $json.mc_criteria_breakdown\n    },\n    coding_scores: [],\n    overall_feedback: \"ข้อสอบปรนัยเสร็จสิ้น กำลังประเมินคำตอบโค้ดด้วย Google AI...\",\n    recommendation: \"รอการประเมินจาก AI\",\n    detailed_analysis: {\n      strengths: [\"ทำข้อสอบปรนัยเรียบร้อยแล้ว\"],\n      weaknesses: [\"กำลังรอการประเมินคำตอบโค้ด\"],\n      suggestions: [\"กรุณารอการประเมินจาก Google AI\"]\n    },\n    score_breakdown: {\n      multiple_choice: $json.mc_score,\n      coding: 0,\n      total: $json.mc_score,\n      total_max: $json.total_max_score,\n      percentage: Math.round(($json.mc_score / $json.total_max_score) * 100)\n    },\n    evaluation_metadata: {\n      processing_method: \"mc_saved_coding_pending\",\n      evaluation_timestamp: $json.timestamp,\n      ai_model: \"pending\"\n    }\n  },\n  evaluation_method: \"mc_first_coding_ai\",\n  timestamp: $json.timestamp\n}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "56fc6990-7587-4e35-9464-381252a3a931",
+      "name": "Save MC Results First",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -700,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=AIzaSyCf_LcAwCSeSV7qYYATtHY-0MF8fVGr4xw",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($node['Prepare Coding-Only AI Request'].json.requestBody) }}",
+        "options": {}
+      },
+      "id": "1ad60335-2e66-4a45-aec1-bce9613fcb87",
+      "name": "Google AI - Coding Only",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -500,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "4a7c8e2f-1b5d-4c9e-8f3a-2d6b9e1a4c7f",
+              "leftValue": "={{ $json.candidates && Array.isArray($json.candidates) && $json.candidates.length > 0 && $json.candidates[0].content && $json.candidates[0].content.parts && $json.candidates[0].content.parts.length > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9f8e7d6c-5b4a-3c2e-1f0d-8e7c6b5a4d3c",
+      "name": "Check AI Response Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -350,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process Google AI Response and Calculate Final Scores\nconst preparedData = $node['Prepare Coding-Only AI Request'].json;\nconst googleResponse = $node['Google AI - Coding Only'].json;\n\n// Handle array response structure from Google AI\nconst responseData = Array.isArray(googleResponse) ? googleResponse[0] : googleResponse;\n\n// Extract AI response\nconst aiText = responseData.candidates?.[0]?.content?.parts?.[0]?.text || responseData.content || '';\n\nlet codingAiResults;\ntry {\n  const cleanText = aiText.replace(/```json\\n?|```\\n?/g, '').trim();\n  codingAiResults = JSON.parse(cleanText);\n  console.log('✅ Successfully parsed AI response');\n} catch (error) {\n  console.log('❌ Failed to parse AI response, creating fallback');\n  \n  // Create fallback for coding evaluation\n  const codingQuestions = preparedData.evaluation_data.coding_questions || [];\n  const answeredQuestions = codingQuestions.filter(q => q.user_answer && q.user_answer.trim().length > 0);\n  \n  let estimatedCodingScore = 0;\n  const fallbackCodingScores = answeredQuestions.map((q, index) => {\n    // Basic scoring based on answer length and structure\n    let questionScore = 0;\n    if (q.user_answer && q.user_answer.trim().length > 10) {\n      questionScore += Math.round(q.points * 0.3); // 30% for attempting\n      if (q.has_code_structure?.has_functions) questionScore += Math.round(q.points * 0.3);\n      if (q.has_code_structure?.appears_complete) questionScore += Math.round(q.points * 0.4);\n    }\n    estimatedCodingScore += questionScore;\n    \n    return {\n      question_id: q.id || `coding_${index + 1}`,\n      Criteria: q.criteria || q.Criteria || \"Programming Skills\",\n      score: questionScore,\n      max_score: q.points || 0,\n      feedback: `การประเมินอัตโนมัติ: ได้คะแนน ${questionScore} จาก ${q.points || 0} คะแนน`,\n      strengths: q.user_answer?.length > 20 ? [\"มีความพยายามในการเขียนโค้ด\"] : [\"ส่งคำตอบ\"],\n      improvements: [\"ต้องการการพัฒนาทักษะการเขียนโค้ด\"]\n    };\n  });\n  \n  codingAiResults = {\n    coding_scores: fallbackCodingScores,\n    overall_feedback: \"ระบบไม่สามารถประเมินด้วย AI ได้ ใช้การประเมินอัตโนมัติแทน\",\n    recommendation: estimatedCodingScore > (preparedData.coding_max_score * 0.6) ? \"พิจารณาเพิ่มเติม\" : \"ต้องการการพัฒนา\"\n  };\n}\n\n// Calculate final scores\nconst mcScore = preparedData.mc_score || 0;\nconst mcMaxScore = preparedData.mc_max_score || 0;\nconst codingScore = (codingAiResults.coding_scores || []).reduce((sum, cs) => sum + (cs.score || 0), 0);\nconst codingMaxScore = preparedData.coding_max_score || 0;\nconst totalScore = mcScore + codingScore;\nconst totalMaxScore = mcMaxScore + codingMaxScore;\nconst finalPercentage = Math.round((totalScore / totalMaxScore) * 100);\n\n// Determine status\nconst status = finalPercentage >= 60 ? \"passed\" : \"failed\";\n\n// Create comprehensive results for database update\nconst finalResults = {\n  total_score: finalPercentage,\n  status: status,\n  \n  // Multiple choice results (already calculated)\n  multiple_choice_score: {\n    score: mcScore,\n    max_score: mcMaxScore,\n    percentage: Math.round((mcScore / mcMaxScore) * 100),\n    criteria_breakdown: preparedData.mc_criteria_breakdown || {}\n  },\n  \n  // Coding results from Google AI\n  coding_scores: codingAiResults.coding_scores || [],\n  \n  // Overall evaluation\n  overall_feedback: codingAiResults.overall_feedback || \"การประเมินเสร็จสิ้น\",\n  recommendation: codingAiResults.recommendation || (finalPercentage >= 70 ? \"แนะนำให้รับเข้าทำงาน\" : finalPercentage >= 50 ? \"พิจารณาเพิ่มเติม\" : \"ไม่แนะนำ\"),\n  \n  // Detailed analysis\n  detailed_analysis: {\n    strengths: (codingAiResults.coding_scores || []).flatMap(cs => cs.strengths || []).concat([\"ทำข้อสอบครบถ้วน\"]),\n    weaknesses: (codingAiResults.coding_scores || []).flatMap(cs => cs.improvements || []),\n    suggestions: [\"ฝึกฝนการเขียนโค้ดเพิ่มเติม\", \"ศึกษาแนวทางการแก้ปัญหาที่หลากหลาย\"]\n  },\n  \n  // Score breakdown with individual question scores\n  score_breakdown: {\n    multiple_choice: mcScore,\n    coding: codingScore,\n    total: totalScore,\n    total_max: totalMaxScore,\n    percentage: finalPercentage,\n    coding_question_scores: (codingAiResults.coding_scores || []).map(cs => ({\n      question_id: cs.question_id,\n      criteria: cs.Criteria,\n      score: cs.score,\n      max_score: cs.max_score,\n      percentage: Math.round((cs.score / cs.max_score) * 100)\n    }))\n  },\n  \n  // Evaluation metadata\n  evaluation_metadata: {\n    ai_model: responseData.modelVersion || \"gemini-1.5-pro\",\n    evaluation_timestamp: new Date().toISOString(),\n    processing_method: \"cost_optimized_coding_only\",\n    tokens_used: responseData.usageMetadata?.totalTokenCount || 0,\n    response_id: responseData.responseId || \"unknown\",\n    raw_ai_response: aiText.substring(0, 500) // First 500 chars for debugging\n  }\n};\n\nreturn [{\n  json: {\n    session_id: preparedData.session_id,\n    ai_results: finalResults,\n    evaluation_method: \"cost_optimized_ai\",\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "1e79283f-01eb-49a1-acbf-9bbf4b1bf224",
+      "name": "Process AI Results & Calculate Scores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -280,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8000/api/v1/exam/sessions/{{ $json.session_id }}/update-results",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "a9a199e5-7d41-489a-9908-4f6754d3ee7c",
+      "name": "Update Final Database Results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -80,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preserve session_id from input data for the next node\nconst originalData = $node['Process AI Results & Calculate Scores'].json;\nconst updateResponse = $json;\n\nconsole.log('📝 Update Response:', JSON.stringify(updateResponse, null, 2));\nconsole.log('📋 Original Data:', JSON.stringify(originalData, null, 2));\n\n// Return the original data with session_id preserved\nreturn [{\n  json: {\n    ...originalData,\n    update_response: updateResponse,\n    database_updated: true\n  }\n}];"
+      },
+      "id": "c3d4e5f6-a7b8-6543-0987-345678901fed",
+      "name": "Preserve Session Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  success: true,\n  message: \"Cost-optimized exam evaluation completed successfully\",\n  session_id: $json.session_id,\n  ai_results: $json.ai_results,\n  evaluation_summary: {\n    total_score: $json.ai_results.total_score,\n    status: $json.ai_results.status,\n    multiple_choice_score: $json.ai_results.multiple_choice_score.score,\n    coding_score: $json.ai_results.score_breakdown.coding,\n    final_percentage: $json.ai_results.score_breakdown.percentage,\n    tokens_used: $json.ai_results.evaluation_metadata.tokens_used,\n    ai_model: $json.ai_results.evaluation_metadata.ai_model,\n    evaluation_method: \"cost_optimized_coding_only\"\n  },\n  email_status: $json.email_status || { sent: false, error: \"Email not configured\" },\n  timestamp: $json.timestamp,\n  workflow_version: \"v9-with-email\"\n} }}",
+        "options": {}
+      },
+      "id": "237673b7-efc4-4155-8901-7699c05e202a",
+      "name": "Return Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        360,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Error handling for AI evaluation failure\nconst error = $input.first().json.error || 'Unknown AI error occurred';\nconst sessionId = $('Prepare Coding-Only AI Request').first()?.json?.session_id || 'unknown';\nconst preparedData = $('Prepare Coding-Only AI Request').first()?.json || {};\n\nconsole.error('AI Coding Evaluation Error:', error);\n\n// Since MC is already saved, create fallback for coding only\nconst mcScore = preparedData.mc_score || 0;\nconst mcMaxScore = preparedData.mc_max_score || 0;\nconst codingMaxScore = preparedData.coding_max_score || 0;\nconst totalMaxScore = preparedData.total_max_score || 100;\n\nconst fallbackResults = {\n  total_score: Math.round((mcScore / totalMaxScore) * 100),\n  status: \"ai_error\",\n  \n  multiple_choice_score: {\n    score: mcScore,\n    max_score: mcMaxScore,\n    percentage: Math.round((mcScore / mcMaxScore) * 100),\n    criteria_breakdown: preparedData.mc_criteria_breakdown || {}\n  },\n  \n  coding_scores: [],\n  \n  overall_feedback: \"ข้อสอบปรนัยเสร็จสิ้น แต่เกิดข้อผิดพลาดในการประเมินโค้ดด้วย AI\",\n  recommendation: \"ต้องการการประเมินเพิ่มเติมจากผู้เชี่ยวชาญ\",\n  \n  detailed_analysis: {\n    strengths: [\"ทำข้อสอบปรนัยเรียบร้อยแล้ว\"],\n    weaknesses: [\"ไม่สามารถประเมินโค้ดได้เนื่องจากข้อผิดพลาดของระบบ AI\"],\n    suggestions: [\"กรุณาติดต่อผู้ดูแลระบบเพื่อประเมินโค้ดใหม่\"]\n  },\n  \n  score_breakdown: {\n    multiple_choice: mcScore,\n    coding: 0,\n    total: mcScore,\n    total_max: totalMaxScore,\n    percentage: Math.round((mcScore / totalMaxScore) * 100)\n  },\n  \n  evaluation_metadata: {\n    processing_method: \"ai_error_fallback\",\n    error_message: error,\n    evaluation_timestamp: new Date().toISOString(),\n    ai_model: \"fallback\"\n  }\n};\n\nreturn [{\n  json: {\n    session_id: sessionId,\n    ai_results: fallbackResults,\n    message: \"MC scores saved successfully, but AI coding evaluation failed\",\n    error: error,\n    evaluation_method: \"error_fallback\",\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "13eeb1e6-80ba-42db-966a-d9e29d77e4d0",
+      "name": "Handle AI Errors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -500,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  success: false,\n  session_id: $json.session_id,\n  message: $json.message,\n  ai_results: $json.ai_results,\n  error: $json.error,\n  evaluation_method: $json.evaluation_method,\n  timestamp: $json.timestamp\n} }}",
+        "options": {}
+      },
+      "id": "de2c8128-2f41-4800-9000-983a5b244bdb",
+      "name": "Return Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "no data"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -580
+      ],
+      "id": "cf926ba1-5e87-45f4-8c29-afc08df29342",
+      "name": "Stop and Error"
+    },
+    {
+      "parameters": {
+        "errorMessage": "no data"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        -380,
+        -580
+      ],
+      "id": "17f858ff-1fa9-47ce-ad69-fd63803afbb6",
+      "name": "Stop and Error1"
+    },
+    {
+      "parameters": {
+        "errorMessage": "no data"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        60,
+        -580
+      ],
+      "id": "987fd4ee-44b0-4d67-8793-e7fd37f65a02",
+      "name": "Stop and Error2"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:8000/api/v1/exam/sessions/{{ $json.session_id }}/multiple-choice-scores",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-e5f6-4321-8765-123456789abc",
+      "name": "Get Multiple Choice Scores",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        120,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine multiple choice scores from backend with AI coding results\nconst aiResultsData = $node['Process AI Results & Calculate Scores'].json;\nconst mcScoresData = $json;\n\nconsole.log('🔍 MC Scores Data:', JSON.stringify(mcScoresData, null, 2));\nconsole.log('🤖 AI Results Data:', JSON.stringify(aiResultsData, null, 2));\n\n// Extract the actual AI results from the nested structure\nconst aiResults = aiResultsData.ai_results || aiResultsData;\n\n// Combine the data\nconst combinedResults = {\n  // Start with AI results\n  ...aiResults,\n  \n  // Override with actual MC scores from backend\n  multiple_choice_score: mcScoresData.multiple_choice_score,\n  candidate_info: mcScoresData.candidate_info,\n  exam_template: mcScoresData.exam_template,\n  session_metadata: mcScoresData.session_metadata,\n  session_id: mcScoresData.session_id,\n  \n  // Recalculate total scores with correct MC scores\n  score_breakdown: {\n    multiple_choice: mcScoresData.multiple_choice_score.score,\n    coding: aiResults.coding_scores ? aiResults.coding_scores.reduce((sum, cs) => sum + cs.score, 0) : 0,\n    total: mcScoresData.multiple_choice_score.score + (aiResults.coding_scores ? aiResults.coding_scores.reduce((sum, cs) => sum + cs.score, 0) : 0),\n    total_max: mcScoresData.multiple_choice_score.max_score + (aiResults.coding_scores ? aiResults.coding_scores.reduce((sum, cs) => sum + cs.max_score, 0) : 0)\n  }\n};\n\n// Recalculate total percentage\nif (combinedResults.score_breakdown.total_max > 0) {\n  combinedResults.total_score = Math.round((combinedResults.score_breakdown.total / combinedResults.score_breakdown.total_max) * 100);\n} else {\n  combinedResults.total_score = 0;\n}\n\nconsole.log('✅ Combined Results:', JSON.stringify(combinedResults, null, 2));\n\nreturn [{\n  json: {\n    ai_results: combinedResults,\n    session_id: mcScoresData.session_id\n  }\n}];"
+      },
+      "id": "b2c3d4e5-f6a7-5432-9876-234567890def",
+      "name": "Combine MC & AI Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare email data with multiple choice scores and AI feedback\nconst finalResults = $json.ai_results;\nconst evaluationData = $node['Prepare Coding-Only AI Request'].json.evaluation_data;\nconst candidateInfo = evaluationData.candidate_info || {};\nconst examTemplate = evaluationData.exam_template || {};\n\n// Extract candidate email\nconst candidateEmail = candidateInfo.email || candidateInfo.candidate_email;\nif (!candidateEmail) {\n  console.log('⚠️ No candidate email found, skipping email sending');\n  return [{\n    json: {\n      ...$json,\n      email_skipped: true,\n      email_skip_reason: 'No candidate email found'\n    }\n  }];\n}\n\n// Prepare email content with Thai localization\nconst candidateName = candidateInfo.candidate_name || candidateInfo.name || 'ผู้สมัคร';\nconst companyName = examTemplate.company_name || 'บริษัท';\nconst positionName = examTemplate.position_name || 'ตำแหน่ง';\nconst programmingLanguage = examTemplate.programming_language || 'Programming';\n\n// Calculate scores properly\nconst mcScore = finalResults.multiple_choice_score?.score || 0;\nconst mcMaxScore = finalResults.multiple_choice_score?.max_score || 0;\nconst mcPercentage = finalResults.multiple_choice_score?.percentage || 0;\n\n// Calculate coding scores from coding_scores array\nconst codingScore = finalResults.coding_scores ? finalResults.coding_scores.reduce((sum, cs) => sum + cs.score, 0) : 0;\nconst codingMaxScore = finalResults.coding_scores ? finalResults.coding_scores.reduce((sum, cs) => sum + cs.max_score, 0) : 0;\n\n// Calculate total scores correctly\nconst totalScore = mcScore + codingScore;\nconst totalMaxScore = mcMaxScore + codingMaxScore;\nconst finalPercentage = totalMaxScore > 0 ? Math.round((totalScore / totalMaxScore) * 100) : 0;\n\n// Determine status in Thai\nlet statusText = '';\nlet statusColor = '';\nif (finalPercentage >= 70) {\n  statusText = 'ผ่าน (ดีเยี่ยม)';\n  statusColor = '#22c55e'; // green\n} else if (finalPercentage >= 60) {\n  statusText = 'ผ่าน';\n  statusColor = '#3b82f6'; // blue\n} else if (finalPercentage >= 50) {\n  statusText = 'ไม่ผ่าน (ใกล้เคียง)';\n  statusColor = '#f59e0b'; // orange\n} else {\n  statusText = 'ไม่ผ่าน';\n  statusColor = '#ef4444'; // red\n}\n\n// Prepare MC criteria breakdown\nlet criteriaBreakdownHtml = '';\nif (finalResults.multiple_choice_score?.criteria_breakdown) {\n  const criteriaEntries = Object.entries(finalResults.multiple_choice_score.criteria_breakdown);\n  if (criteriaEntries.length > 0) {\n    criteriaBreakdownHtml = `\n    <div style=\"margin: 20px 0; padding: 15px; background-color: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6;\">\n      <h3 style=\"color: #1e40af; margin: 0 0 10px 0; font-size: 16px;\">📊 คะแนนแยกตามหมวดหมู่</h3>\n      <table style=\"width: 100%; border-collapse: collapse;\">\n        <thead>\n          <tr style=\"background-color: #e2e8f0;\">\n            <th style=\"padding: 8px; text-align: left; border: 1px solid #cbd5e1;\">หมวดหมู่</th>\n            <th style=\"padding: 8px; text-align: center; border: 1px solid #cbd5e1;\">คะแนน</th>\n            <th style=\"padding: 8px; text-align: center; border: 1px solid #cbd5e1;\">เปอร์เซ็นต์</th>\n          </tr>\n        </thead>\n        <tbody>\n          ${criteriaEntries.map(([criteria, data]) => `\n            <tr>\n              <td style=\"padding: 8px; border: 1px solid #cbd5e1;\">${criteria}</td>\n              <td style=\"padding: 8px; text-align: center; border: 1px solid #cbd5e1;\">${data.score}/${data.max_score}</td>\n              <td style=\"padding: 8px; text-align: center; border: 1px solid #cbd5e1;\">${Math.round((data.score/data.max_score)*100)}%</td>\n            </tr>\n          `).join('')}\n        </tbody>\n      </table>\n    </div>`;\n  }\n}\n\n// Prepare coding scores breakdown\nlet codingScoresHtml = '';\nif (finalResults.coding_scores && finalResults.coding_scores.length > 0) {\n  codingScoresHtml = `\n  <div style=\"margin: 20px 0; padding: 15px; background-color: #f0fdf4; border-radius: 8px; border-left: 4px solid #22c55e;\">\n    <h3 style=\"color: #15803d; margin: 0 0 10px 0; font-size: 16px;\">💻 คะแนนข้อสอบเขียนโค้ด</h3>\n    ${finalResults.coding_scores.map((cs, index) => `\n      <div style=\"margin: 10px 0; padding: 10px; background-color: white; border-radius: 6px; border: 1px solid #d1fae5;\">\n        <div style=\"font-weight: bold; color: #065f46; margin-bottom: 5px;\">ข้อ ${index + 1}: ${cs.Criteria}</div>\n        <div style=\"margin: 5px 0;\">\n          <span style=\"background-color: ${cs.score >= cs.max_score * 0.7 ? '#dcfce7' : cs.score >= cs.max_score * 0.5 ? '#fef3c7' : '#fee2e2'}; \n                       color: ${cs.score >= cs.max_score * 0.7 ? '#166534' : cs.score >= cs.max_score * 0.5 ? '#92400e' : '#991b1b'}; \n                       padding: 4px 8px; border-radius: 4px; font-weight: bold;\">\n            ${cs.score}/${cs.max_score} คะแนน (${Math.round((cs.score/cs.max_score)*100)}%)\n          </span>\n        </div>\n        <div style=\"color: #374151; font-size: 14px; margin-top: 5px;\">${cs.feedback}</div>\n        ${cs.strengths && cs.strengths.length > 0 ? `\n          <div style=\"margin-top: 8px;\">\n            <strong style=\"color: #059669;\">จุดแข็ง:</strong>\n            <ul style=\"margin: 5px 0; padding-left: 20px; color: #065f46;\">\n              ${cs.strengths.map(s => `<li>${s}</li>`).join('')}\n            </ul>\n          </div>\n        ` : ''}\n        ${cs.improvements && cs.improvements.length > 0 ? `\n          <div style=\"margin-top: 8px;\">\n            <strong style=\"color: #dc2626;\">ข้อเสนอแนะ:</strong>\n            <ul style=\"margin: 5px 0; padding-left: 20px; color: #991b1b;\">\n              ${cs.improvements.map(i => `<li>${i}</li>`).join('')}\n            </ul>\n          </div>\n        ` : ''}\n      </div>\n    `).join('')}\n  </div>`;\n}\n\n// Create the HTML email content\nconst emailHtml = `\n<!DOCTYPE html>\n<html lang=\"th\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>ผลการสอบ ${programmingLanguage}</title>\n</head>\n<body style=\"font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f9fafb;\">\n    <div style=\"background-color: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); overflow: hidden;\">\n        <!-- Header -->\n        <div style=\"background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center;\">\n            <h1 style=\"margin: 0; font-size: 28px; font-weight: bold;\">📋 ผลการสอบ ${programmingLanguage}</h1>\n            <p style=\"margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;\">${companyName} - ${positionName}</p>\n        </div>\n        \n        <!-- Candidate Info -->\n        <div style=\"padding: 25px; border-bottom: 1px solid #e5e7eb;\">\n            <h2 style=\"color: #374151; margin: 0 0 15px 0; font-size: 20px;\">👤 ข้อมูลผู้สมัคร</h2>\n            <div style=\"background-color: #f8fafc; padding: 15px; border-radius: 8px;\">\n                <p style=\"margin: 5px 0;\"><strong>ชื่อ:</strong> ${candidateName}</p>\n                <p style=\"margin: 5px 0;\"><strong>อีเมล:</strong> ${candidateEmail}</p>\n                <p style=\"margin: 5px 0;\"><strong>ตำแหน่งที่สมัคร:</strong> ${positionName}</p>\n                <p style=\"margin: 5px 0;\"><strong>ภาษาโปรแกรม:</strong> ${programmingLanguage}</p>\n            </div>\n        </div>\n        \n        <!-- Overall Score -->\n        <div style=\"padding: 25px; border-bottom: 1px solid #e5e7eb;\">\n            <h2 style=\"color: #374151; margin: 0 0 15px 0; font-size: 20px;\">🎯 คะแนนรวม</h2>\n            <div style=\"text-align: center; padding: 20px; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border-radius: 12px; border: 2px solid #0ea5e9;\">\n                <div style=\"font-size: 48px; font-weight: bold; color: ${statusColor}; margin-bottom: 10px;\">\n                    ${finalPercentage}%\n                </div>\n                <div style=\"font-size: 24px; font-weight: bold; color: ${statusColor}; margin-bottom: 5px;\">\n                    ${statusText}\n                </div>\n                <div style=\"font-size: 16px; color: #64748b;\">\n                    ${totalScore}/${totalMaxScore} คะแนน\n                </div>\n            </div>\n        </div>\n        \n        <!-- Score Breakdown -->\n        <div style=\"padding: 25px; border-bottom: 1px solid #e5e7eb;\">\n            <h2 style=\"color: #374151; margin: 0 0 15px 0; font-size: 20px;\">📈 รายละเอียดคะแนน</h2>\n            \n            <!-- Multiple Choice Score -->\n            <div style=\"margin: 15px 0; padding: 15px; background-color: #fef7ff; border-radius: 8px; border-left: 4px solid #a855f7;\">\n                <h3 style=\"color: #7c3aed; margin: 0 0 10px 0; font-size: 16px;\">✅ ข้อสอบปรนัย</h3>\n                <div style=\"display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;\">\n                    <div>\n                        <span style=\"font-size: 18px; font-weight: bold; color: #7c3aed;\">${mcScore}/${mcMaxScore} คะแนน</span>\n                        <span style=\"margin-left: 10px; background-color: #ddd6fe; color: #6b21a8; padding: 4px 8px; border-radius: 4px; font-weight: bold;\">\n                            ${mcPercentage}%\n                        </span>\n                    </div>\n                </div>\n            </div>\n            \n            <!-- Coding Score -->\n            <div style=\"margin: 15px 0; padding: 15px; background-color: #f0fdf4; border-radius: 8px; border-left: 4px solid #22c55e;\">\n                <h3 style=\"color: #15803d; margin: 0 0 10px 0; font-size: 16px;\">💻 ข้อสอบเขียนโค้ด</h3>\n                <div style=\"display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;\">\n                    <div>\n                        <span style=\"font-size: 18px; font-weight: bold; color: #15803d;\">${codingScore}/${codingMaxScore} คะแนน</span>\n                        <span style=\"margin-left: 10px; background-color: #dcfce7; color: #166534; padding: 4px 8px; border-radius: 4px; font-weight: bold;\">\n                            ${codingMaxScore > 0 ? Math.round((codingScore/codingMaxScore)*100) : 0}%\n                        </span>\n                    </div>\n                </div>\n            </div>\n        </div>\n        \n        ${criteriaBreakdownHtml}\n        \n        ${codingScoresHtml}\n        \n        <!-- AI Feedback -->\n        <div style=\"padding: 25px; border-bottom: 1px solid #e5e7eb;\">\n            <h2 style=\"color: #374151; margin: 0 0 15px 0; font-size: 20px;\">🤖 ข้อเสนะแนะจาก AI</h2>\n            \n            <div style=\"margin: 15px 0; padding: 15px; background-color: #fffbeb; border-radius: 8px; border-left: 4px solid #f59e0b;\">\n                <h3 style=\"color: #d97706; margin: 0 0 10px 0; font-size: 16px;\">💬 ความเห็นโดยรวม</h3>\n                <p style=\"margin: 0; color: #92400e; line-height: 1.6;\">${finalResults.overall_feedback || 'ไม่มีข้อมูลความเห็นโดยรวม'}</p>\n            </div>\n            \n            <div style=\"margin: 15px 0; padding: 15px; background-color: #f0f9ff; border-radius: 8px; border-left: 4px solid #0ea5e9;\">\n                <h3 style=\"color: #0284c7; margin: 0 0 10px 0; font-size: 16px;\">🎯 คำแนะนำ</h3>\n                <p style=\"margin: 0; color: #0c4a6e; line-height: 1.6;\">${finalResults.recommendation || 'ไม่มีข้อมูลคำแนะนำ'}</p>\n            </div>\n            \n            ${finalResults.detailed_analysis?.strengths && finalResults.detailed_analysis.strengths.length > 0 ? `\n            <div style=\"margin: 15px 0; padding: 15px; background-color: #f0fdf4; border-radius: 8px; border-left: 4px solid #22c55e;\">\n                <h3 style=\"color: #15803d; margin: 0 0 10px 0; font-size: 16px;\">💪 จุดแข็ง</h3>\n                <ul style=\"margin: 0; padding-left: 20px; color: #166534;\">\n                    ${finalResults.detailed_analysis.strengths.map(s => `<li style=\"margin: 5px 0;\">${s}</li>`).join('')}\n                </ul>\n            </div>\n            ` : ''}\n            \n            ${finalResults.detailed_analysis?.suggestions && finalResults.detailed_analysis.suggestions.length > 0 ? `\n            <div style=\"margin: 15px 0; padding: 15px; background-color: #fef2f2; border-radius: 8px; border-left: 4px solid #ef4444;\">\n                <h3 style=\"color: #dc2626; margin: 0 0 10px 0; font-size: 16px;\">📝 ข้อเสนอแนะเพิ่มเติม</h3>\n                <ul style=\"margin: 0; padding-left: 20px; color: #991b1b;\">\n                    ${finalResults.detailed_analysis.suggestions.map(s => `<li style=\"margin: 5px 0;\">${s}</li>`).join('')}\n                </ul>\n            </div>\n            ` : ''}\n        </div>\n        \n        <!-- Footer -->\n        <div style=\"padding: 25px; background-color: #f8fafc; text-align: center;\">\n            <p style=\"margin: 0; color: #6b7280; font-size: 14px;\">\n                📧 อีเมลนี้ส่งโดยระบบอัตโนมัติ กรุณาอย่าตอบกลับ<br>\n                หากมีคำถาม กรุณาติดต่อ HR ของบริษัท\n            </p>\n            <p style=\"margin: 10px 0 0 0; color: #9ca3af; font-size: 12px;\">\n                © ${new Date().getFullYear()} ${companyName} - ระบบประเมินผลการสอบออนไลน์\n            </p>\n        </div>\n    </div>\n</body>\n</html>\n`;\n\n// Prepare plain text version\nconst emailText = `\nผลการสอบ ${programmingLanguage}\n${companyName} - ${positionName}\n\n=== ข้อมูลผู้สมัคร ===\nชื่อ: ${candidateName}\nอีเมล: ${candidateEmail}\nตำแหน่งที่สมัคร: ${positionName}\nภาษาโปรแกรม: ${programmingLanguage}\n\n=== คะแนนรวม ===\nผลการสอบ: ${statusText}\nคะแนน: ${totalScore}/${totalMaxScore} (${finalPercentage}%)\n\n=== รายละเอียดคะแนน ===\nข้อสอบปรนัย: ${mcScore}/${mcMaxScore} คะแนน (${mcPercentage}%)\nข้อสอบเขียนโค้ด: ${codingScore}/${codingMaxScore} คะแนน (${codingMaxScore > 0 ? Math.round((codingScore/codingMaxScore)*100) : 0}%)\n\n=== ข้อเสนะแนะจาก AI ===\nความเห็นโดยรวม: ${finalResults.overall_feedback || 'ไม่มีข้อมูลความเห็นโดยรวม'}\nคำแนะนำ: ${finalResults.recommendation || 'ไม่มีข้อมูลคำแนะนำ'}\n\n---\nอีเมลนี้ส่งโดยระบบอัตโนมัติ กรุณาอย่าตอบกลับ\nหากมีคำถาม กรุณาติดต่อ HR ของบริษัท\n© ${new Date().getFullYear()} ${companyName}\n`;\n\nreturn [{\n  json: {\n    ...$json,\n    email_data: {\n      to: candidateEmail,\n      subject: `📋 ผลการสอบ ${programmingLanguage} - ${candidateName} (${statusText})`,\n      html: emailHtml,\n      text: emailText,\n      candidate_name: candidateName,\n      company_name: companyName,\n      position_name: positionName,\n      final_percentage: finalPercentage,\n      status_text: statusText\n    },\n    email_ready: true\n  }\n}];"
+      },
+      "id": "de799c66-ee16-42cf-bd69-927a139fade2",
+      "name": "Prepare Email Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email_data.to }}",
+        "subject": "={{ $json.email_data.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.email_data.html }}",
+        "options": {
+          "ccList": "",
+          "bccList": "",
+          "replyTo": "",
+          "attachments": "attachment"
+        },
+        "attachments": []
+      },
+      "id": "30b7eb28-1e79-480f-bc87-4288743d4df2",
+      "name": "Send Email via Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        420,
+        -180
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_GMAIL_OAUTH2_CREDENTIAL_ID_HERE",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle email sending results and continue with success response\nconst originalData = $json;\nconst emailResult = $node['Send Email via Gmail']?.json || {};\nconst emailError = $node['Send Email via Gmail']?.error || null;\n\n// Check if email was sent successfully\n// Gmail API returns an object with id and threadId on success\nconst emailSent = !emailError && emailResult && (emailResult.id || emailResult.messageId);\n\nconsole.log('📧 Email sending result:', {\n  sent: emailSent,\n  result: emailResult,\n  error: emailError,\n  recipient: originalData.email_data?.to\n});\n\n// Return the original data with email status\nreturn [{\n  json: {\n    ...originalData,\n    email_status: {\n      sent: emailSent,\n      message_id: emailResult?.id || emailResult?.messageId || 'gmail-sent',\n      thread_id: emailResult?.threadId || null,\n      error: emailError ? emailError.message || emailError : null,\n      recipient: originalData.email_data?.to,\n      sent_at: emailSent ? new Date().toISOString() : null,\n      note: emailError ? 'Email sending failed but exam results were processed successfully' : 'Email sent successfully via Gmail OAuth2'\n    }\n  }\n}];"
+      },
+      "id": "c2b9065f-9d3f-4999-a101-dd246de08f98",
+      "name": "Process Email Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "no data"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        260
+      ],
+      "id": "d8733c33-20cf-4eb6-870c-c2a7b6267b9a",
+      "name": "Stop and Error3"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Save Draft Exam",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Draft Exam": {
+      "main": [
+        [
+          {
+            "node": "Enhanced Code with Criteria",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Error - Draft Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google AI Request": {
+      "main": [
+        [
+          {
+            "node": "Process AI Response with Criteria",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Error - AI Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process AI Response with Criteria": {
+      "main": [
+        [
+          {
+            "node": "Update Exam with Questions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Exam with Questions": {
+      "main": [
+        [
+          {
+            "node": "Send Response with Criteria",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Error - Update Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enhanced Code with Criteria": {
+      "main": [
+        [
+          {
+            "node": "Google AI Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Exam Complete": {
+      "main": [
+        [
+          {
+            "node": "Prepare Coding-Only AI Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Coding-Only AI Request": {
+      "main": [
+        [
+          {
+            "node": "Save MC Results First",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save MC Results First": {
+      "main": [
+        [
+          {
+            "node": "Google AI - Coding Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google AI - Coding Only": {
+      "main": [
+        [
+          {
+            "node": "Check AI Response Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check AI Response Success": {
+      "main": [
+        [
+          {
+            "node": "Process AI Results & Calculate Scores",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle AI Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process AI Results & Calculate Scores": {
+      "main": [
+        [
+          {
+            "node": "Update Final Database Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Final Database Results": {
+      "main": [
+        [
+          {
+            "node": "Preserve Session Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preserve Session Data": {
+      "main": [
+        [
+          {
+            "node": "Get Multiple Choice Scores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Multiple Choice Scores": {
+      "main": [
+        [
+          {
+            "node": "Combine MC & AI Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine MC & AI Results": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle AI Errors": {
+      "main": [
+        [
+          {
+            "node": "Return Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error - Draft Failed": {
+      "main": [
+        [
+          {
+            "node": "Stop and Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error - AI Failed": {
+      "main": [
+        [
+          {
+            "node": "Stop and Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error - Update Failed": {
+      "main": [
+        [
+          {
+            "node": "Stop and Error2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Error Response": {
+      "main": [
+        [
+          {
+            "node": "Stop and Error3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Email Data": {
+      "main": [
+        [
+          {
+            "node": "Send Email via SMTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email via SMTP": {
+      "main": [
+        [
+          {
+            "node": "Process Email Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Process Email Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Email Status": {
+      "main": [
+        [
+          {
+            "node": "Return Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "5d2c95c2-07d2-4faf-b66a-92473d62262e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "80664dbc990da4ced652c71ae04d16d3881c368fc794bc8eb2db300cc33d46e0"
+  },
+  "id": "ViGB3gGfw086snZI",
+  "tags": []
+}

@@ -18,6 +18,7 @@ from core.database import engine, SessionLocal, get_db, Base
 from models.exam import ExamSession, Candidate
 from services.face_detection import FaceDetectionService
 from services.proctoring import ProctoringService
+from utils.websocket_manager import WebSocketManager
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -48,6 +49,9 @@ app.include_router(candidate.router, prefix="/api/v1")
 # Initialize services
 face_detection_service = FaceDetectionService()
 proctoring_service = ProctoringService()
+
+# Initialize WebSocket manager
+websocket_manager = WebSocketManager()
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -86,33 +90,49 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now()}
 
-@app.websocket("/ws/exam/{session_id}")
-async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    await manager.connect(websocket, session_id)
+@app.websocket("/ws/admin/{candidate_id}")
+async def websocket_admin_endpoint(websocket: WebSocket, candidate_id: str):
+    """WebSocket endpoint for admin real-time monitoring"""
+    admin_channel = f"admin_candidate_{candidate_id}"
+    await websocket_manager.connect(websocket, admin_channel)
     try:
         while True:
+            # Keep connection alive and handle incoming messages
             data = await websocket.receive_text()
-            message_data = json.loads(data)
+            message = json.loads(data)
             
-            # Handle different message types
-            if message_data.get("type") == "face_frame":
-                # Process face detection
-                frame_data = message_data.get("frame")
-                detection_result = await face_detection_service.detect_face(frame_data)
-                
-                response = {
-                    "type": "face_detection_result",
-                    "result": detection_result
-                }
-                await manager.send_personal_message(json.dumps(response), websocket)
-                
-            elif message_data.get("type") == "exam_event":
-                # Log exam events
-                event_type = message_data.get("event")
-                await proctoring_service.log_event(session_id, event_type, message_data)
+            # Handle ping/pong for connection health
+            if message.get("type") == "ping":
+                await websocket_manager.send_personal_message(admin_channel, {"type": "pong"})
                 
     except WebSocketDisconnect:
-        manager.disconnect(websocket, session_id)
+        websocket_manager.disconnect(admin_channel)
+    except Exception as e:
+        logger.error(f"WebSocket error for admin {candidate_id}: {str(e)}")
+        websocket_manager.disconnect(admin_channel)
+
+@app.websocket("/ws/exam/{session_id}")
+async def websocket_exam_endpoint(websocket: WebSocket, session_id: str):
+    """WebSocket endpoint for exam interface real-time communication"""
+    await websocket_manager.connect(websocket, session_id)
+    try:
+        while True:
+            # Keep connection alive and handle incoming messages
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            # Handle different message types
+            if message.get("type") == "ping":
+                await websocket_manager.send_personal_message(session_id, {"type": "pong"})
+            elif message.get("type") == "evidence_update":
+                # Handle evidence updates from exam interface
+                pass
+                
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(session_id)
+    except Exception as e:
+        logger.error(f"WebSocket error for session {session_id}: {str(e)}")
+        websocket_manager.disconnect(session_id)
 
 @app.post("/api/v1/start-exam")
 async def start_exam(

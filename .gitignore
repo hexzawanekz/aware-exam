@@ -67,4 +67,47 @@ venv/
 
 # Development scripts (local only)
 dev-start.sh
-dev-start.bat 
+dev-start.bat
+
+# Sensitive files
+config.env
+credentials/
+*.json
+!package.json
+!package-lock.json
+!workflows/*.json
+!exam-auto-create-with-criteria.json
+
+# Database files
+*.db
+*.sqlite
+recruitment_exam.db
+recruitment_db.sqlite
+
+# AI Models (too large for Git)
+*.pt
+*.pth
+*.model
+
+# Upload directories
+uploads/
+exam_videos/
+evidence_frames/
+face_recognition_data/
+
+# Test and debug files
+*test*.py
+*debug*.py
+*simple*.py
+check_*.py
+update_*.py
+migrate_*.py
+final_test.py
+
+# Temporary deletion scripts
+delete_*.py
+
+# Runtime generated files
+logs/
+stop-services.sh
+stop-services.bat 

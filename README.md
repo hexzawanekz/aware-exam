@@ -28,13 +28,39 @@ This is a complete examination system that automatically generates programming e
 
 ## 🚀 **Quick Start**
 
-### **Prerequisites**
+### **Super Quick Start (Recommended)**
 
-- Docker and Docker Compose
+```bash
+git clone <repository-url>
+cd n8n
+
+# For Windows
+./quick-start.bat
+
+# For Linux/Mac
+./quick-start.sh
+```
+
+**That's it!** The script will automatically:
+
+- Check system requirements
+- Set up configuration
+- Install all dependencies
+- Start all services
+- Open the application in your browser
+
+📖 **For detailed installation instructions, see [INSTALL.md](INSTALL.md)**
+
+### **Manual Setup**
+
+#### **Prerequisites**
+
+- Docker and Docker Compose (recommended)
+- **OR** Python 3.8+, Node.js 16+, N8N
 - Git
 - Available ports: 3000, 5678, 8000, 6333, 6379, 5432
 
-### **Installation Steps**
+#### **Docker Installation (Recommended)**
 
 1. **Clone and Setup**
 

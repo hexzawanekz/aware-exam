@@ -100,6 +100,16 @@ const ExamInterface = () => {
   const [saveTimeouts, setSaveTimeouts] = useState({});
   const [webcamReady, setWebcamReady] = useState(false);
 
+  // Add face detection readiness states
+  const [faceDetectionReady, setFaceDetectionReady] = useState(false);
+  const [faceDetectionChecking, setFaceDetectionChecking] = useState(false);
+  const [faceDetectionAttempts, setFaceDetectionAttempts] = useState(0);
+  const [systemReadyStatus, setSystemReadyStatus] = useState({
+    camera: false,
+    faceDetection: false,
+    systemReady: false,
+  });
+
   // Cheat warning modal states
   const [showCheatWarning, setShowCheatWarning] = useState(false);
   const [cheatWarningData, setCheatWarningData] = useState({
@@ -183,6 +193,37 @@ const ExamInterface = () => {
       });
     }
   }, [sessionId]);
+
+  // Update system ready status based on camera and face detection
+  useEffect(() => {
+    const newStatus = {
+      camera: webcamReady,
+      faceDetection: faceDetectionReady,
+      systemReady: webcamReady && faceDetectionReady,
+    };
+
+    setSystemReadyStatus(newStatus);
+
+    console.log("🎯 System Ready Status:", {
+      camera: newStatus.camera,
+      faceDetection: newStatus.faceDetection,
+      systemReady: newStatus.systemReady,
+    });
+  }, [webcamReady, faceDetectionReady]);
+
+  // Trigger face detection pre-check when webcam is ready
+  useEffect(() => {
+    if (webcamReady && !faceDetectionReady && !faceDetectionChecking) {
+      console.log("📹 Webcam is ready, starting face detection pre-check...");
+
+      // Wait a moment for webcam to stabilize before starting pre-check
+      const preCheckTimer = setTimeout(() => {
+        performFaceDetectionPreCheck();
+      }, 2000); // Wait 2 seconds for camera to stabilize
+
+      return () => clearTimeout(preCheckTimer);
+    }
+  }, [webcamReady, faceDetectionReady, faceDetectionChecking]);
 
   // Load exam data from database API
   useEffect(() => {
@@ -407,6 +448,18 @@ const ExamInterface = () => {
             .catch((error) => {
               console.error("Failed to log tab switch activity:", error);
             });
+
+          // Send real-time evidence for tab switch
+          sendEvidenceToAPI({
+            event_type: "tab_switch",
+            confidence: 0.95,
+            evidence_level: "medium",
+            cheating_score: getCheatingScore("tab_switch"),
+            metadata: {
+              violation_count: violations.tabSwitches + 1,
+              timestamp,
+            },
+          });
         }
       }
     };
@@ -451,6 +504,18 @@ const ExamInterface = () => {
             .catch((error) => {
               console.error("Failed to log fullscreen exit activity:", error);
             });
+
+          // Send real-time evidence for fullscreen exit
+          sendEvidenceToAPI({
+            event_type: "fullscreen_exit",
+            confidence: 0.95,
+            evidence_level: "medium",
+            cheating_score: getCheatingScore("fullscreen_exit"),
+            metadata: {
+              violation_count: violations.fullscreenExits + 1,
+              timestamp,
+            },
+          });
         }
       }
     };
@@ -936,9 +1001,20 @@ const ExamInterface = () => {
     }
   }, [faceDetectionStatus]);
 
-  // Face detection loop - เริ่มทำงานทันทีที่มี webcam (ไม่ต้องรอ start exam)
+  // Face detection loop - Only start when system is ready (camera + face detection pre-check passed)
   useEffect(() => {
-    if (!webcamReady || !webcamRef.current) return;
+    if (!systemReadyStatus.systemReady || !webcamRef.current) {
+      console.log(
+        "⏸️ Face detection loop paused - system not ready:",
+        systemReadyStatus
+      );
+      return;
+    }
+
+    console.log(
+      "▶️ Face detection loop starting - system ready:",
+      systemReadyStatus
+    );
 
     // Real YOLO11 face detection for all sessions (including demo sessions)
     if (true) {
@@ -1218,7 +1294,56 @@ const ExamInterface = () => {
         clearInterval(faceDetectionInterval);
       };
     }
-  }, [webcamReady, sessionId, examData]);
+  }, [systemReadyStatus.systemReady, sessionId, examData]);
+
+  // Function to send real-time evidence to API
+  const sendEvidenceToAPI = async (evidenceData) => {
+    if (!examStarted || !sessionId) return;
+
+    try {
+      const payload = {
+        event_type: evidenceData.event_type,
+        confidence: evidenceData.confidence || 0.8,
+        evidence_level: evidenceData.evidence_level || "medium",
+        cheating_score: evidenceData.cheating_score || 0,
+        candidate_id: examData?.candidate_id || 1,
+        metadata: {
+          timestamp: new Date().toISOString(),
+          face_count: faceDetectionStatus.face_rectangles?.length || 0,
+          detection_confidence: faceDetectionStatus.confidence || 0,
+          ...evidenceData.metadata,
+        },
+        frame_analysis: evidenceData.frame_analysis || {},
+        frame_url: evidenceData.frame_url || null,
+        screenshot_url: evidenceData.screenshot_url || null,
+      };
+
+      const response = await api.request(
+        `/api/v1/exam/sessions/${sessionId}/evidence/capture`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        }
+      );
+
+      console.log("✅ Evidence sent to API:", response);
+
+      // Update local evidence capture stats
+      setEvidenceCapture((prev) => ({
+        ...prev,
+        totalEvents: prev.totalEvents + 1,
+        highRiskEvents:
+          evidenceData.evidence_level === "high"
+            ? prev.highRiskEvents + 1
+            : prev.highRiskEvents,
+        lastEvidenceScore: evidenceData.cheating_score || 0,
+        lastEventType: evidenceData.event_type,
+        evidenceLevel: evidenceData.evidence_level || "medium",
+      }));
+    } catch (error) {
+      console.error("❌ Failed to send evidence to API:", error);
+    }
+  };
 
   // Functions for tracking suspicious activities
   const trackSuspiciousActivities = (activities) => {
@@ -1226,7 +1351,7 @@ const ExamInterface = () => {
     const WARNING_THRESHOLD = 5000; // 5 seconds in milliseconds
 
     // Show warning tracker modal when activities are detected
-    setShowWarningTracker(true);
+    // setShowWarningTracker(true); // Commented out - no modal needed
 
     setSuspiciousActivityTracker((prev) => {
       const newTracker = { ...prev };
@@ -1250,6 +1375,18 @@ const ExamInterface = () => {
             // Start tracking this activity
             newTracker[mappedActivity].startTime = currentTime;
             newTracker[mappedActivity].duration = 0;
+
+            // Send real-time evidence for new activity detection
+            sendEvidenceToAPI({
+              event_type: mappedActivity,
+              confidence: 0.85,
+              evidence_level: getEvidenceLevel(mappedActivity),
+              cheating_score: getCheatingScore(mappedActivity),
+              metadata: {
+                activity_started: true,
+                original_activity: activity,
+              },
+            });
           } else {
             // Update duration
             newTracker[mappedActivity].duration =
@@ -1265,12 +1402,25 @@ const ExamInterface = () => {
                 timeSinceLastWarning >= 10000
               ) {
                 // 10 seconds between warnings
-                showCheatWarningModal(
-                  mappedActivity,
-                  newTracker[mappedActivity].warningCount + 1
-                );
+                // showCheatWarningModal(
+                //   mappedActivity,
+                //   newTracker[mappedActivity].warningCount + 1
+                // ); // Commented out - no modal needed
                 newTracker[mappedActivity].warningCount += 1;
                 newTracker[mappedActivity].lastWarningTime = currentTime;
+
+                // Send high-risk evidence for prolonged suspicious activity
+                sendEvidenceToAPI({
+                  event_type: mappedActivity,
+                  confidence: 0.95,
+                  evidence_level: "high",
+                  cheating_score: getCheatingScore(mappedActivity) + 20,
+                  metadata: {
+                    prolonged_activity: true,
+                    duration_ms: newTracker[mappedActivity].duration,
+                    warning_count: newTracker[mappedActivity].warningCount,
+                  },
+                });
               }
             }
           }
@@ -1296,9 +1446,9 @@ const ExamInterface = () => {
 
   const resetAllActivityTrackers = () => {
     // Hide warning tracker modal with a short delay when no activities are detected
-    setTimeout(() => {
-      setShowWarningTracker(false);
-    }, 2000); // 2 seconds delay to allow user to see the "no suspicious activity" message
+    // setTimeout(() => {
+    //   setShowWarningTracker(false);
+    // }, 2000); // 2 seconds delay - Commented out, no modal needed
 
     setSuspiciousActivityTracker((prev) => {
       const newTracker = { ...prev };
@@ -1348,6 +1498,123 @@ const ExamInterface = () => {
 
   const handleCheatWarningResponse = () => {
     setShowCheatWarning(false);
+  };
+
+  // Helper functions for evidence scoring
+  const getEvidenceLevel = (activityType) => {
+    const highRiskActivities = ["mobile_phone_detected", "multiple_faces"];
+    const mediumRiskActivities = ["head_turned_away", "looking_away_detected"];
+
+    if (highRiskActivities.includes(activityType)) return "high";
+    if (mediumRiskActivities.includes(activityType)) return "medium";
+    return "low";
+  };
+
+  const getCheatingScore = (activityType) => {
+    const scores = {
+      mobile_phone_detected: 50,
+      multiple_faces: 45,
+      head_turned_away: 25,
+      looking_away_detected: 20,
+      head_down_detected: 15,
+      tab_switch: 30,
+      fullscreen_exit: 35,
+      copy_paste: 40,
+      right_click: 10,
+    };
+    return scores[activityType] || 10;
+  };
+
+  // Face detection pre-check system
+  const performFaceDetectionPreCheck = async () => {
+    console.log("🔍 Starting face detection pre-check...");
+    setFaceDetectionChecking(true);
+    setFaceDetectionAttempts(0);
+
+    const maxAttempts = 10; // Maximum 10 attempts (10 seconds)
+    let attempts = 0;
+    let faceDetected = false;
+
+    const checkFace = async () => {
+      if (!webcamRef.current || attempts >= maxAttempts) {
+        console.log(
+          `❌ Face detection pre-check failed after ${attempts} attempts`
+        );
+        setFaceDetectionChecking(false);
+        setFaceDetectionReady(false);
+        return false;
+      }
+
+      attempts++;
+      setFaceDetectionAttempts(attempts);
+      console.log(`🔍 Face detection attempt ${attempts}/${maxAttempts}`);
+
+      try {
+        const imageSrc = webcamRef.current.getScreenshot();
+        if (!imageSrc) {
+          console.log("⚠️ No image captured, retrying...");
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          return await checkFace();
+        }
+
+        // Send frame to backend face detection service
+        const response = await api.request("/api/v1/exam/verify-face", {
+          method: "POST",
+          body: JSON.stringify({
+            candidate_id: examData?.candidate_id || 1,
+            frame_data: imageSrc,
+            session_id: sessionId,
+          }),
+        });
+
+        console.log(`📡 Pre-check API response:`, {
+          face_detected: response.face_detected,
+          confidence: response.confidence,
+          attempt: attempts,
+        });
+
+        if (response.face_detected && response.confidence > 0.3) {
+          console.log(
+            `✅ Face detection pre-check successful! (Confidence: ${Math.round(
+              response.confidence * 100
+            )}%)`
+          );
+          setFaceDetectionReady(true);
+          setFaceDetectionChecking(false);
+          return true;
+        } else {
+          console.log(
+            `⚠️ No face detected or low confidence (attempt ${attempts}/${maxAttempts})`
+          );
+          if (attempts < maxAttempts) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            return await checkFace();
+          } else {
+            console.log(
+              "❌ Face detection pre-check failed - no face detected after all attempts"
+            );
+            setFaceDetectionReady(false);
+            setFaceDetectionChecking(false);
+            return false;
+          }
+        }
+      } catch (error) {
+        console.error(
+          `❌ Face detection pre-check error (attempt ${attempts}):`,
+          error
+        );
+        if (attempts < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          return await checkFace();
+        } else {
+          setFaceDetectionReady(false);
+          setFaceDetectionChecking(false);
+          return false;
+        }
+      }
+    };
+
+    return await checkFace();
   };
 
   const handleStartExam = async () => {
@@ -1986,16 +2253,28 @@ function solution() {
                 variant="contained"
                 size="large"
                 onClick={handleStartExam}
-                disabled={!webcamReady}
+                disabled={!systemReadyStatus.systemReady}
               >
                 {examData.status === "in_progress" &&
                 examData.remaining_time_seconds > 0
                   ? t("exam.resume_exam")
                   : t("exam.start_exam")}
               </Button>
-              {!webcamReady && (
+              {!systemReadyStatus.camera && (
                 <Alert severity="warning" sx={{ mt: 2 }}>
                   {t("proctoring.camera_required")}
+                </Alert>
+              )}
+              {systemReadyStatus.camera && !systemReadyStatus.faceDetection && (
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  {faceDetectionChecking
+                    ? `กำลังตรวจสอบการตรวจจับใบหน้า... (${faceDetectionAttempts}/10)`
+                    : "กรุณาให้ใบหน้าของคุณปรากฏในกล้องเพื่อเริ่มการสอบ"}
+                </Alert>
+              )}
+              {systemReadyStatus.systemReady && (
+                <Alert severity="success" sx={{ mt: 2 }}>
+                  ระบบพร้อมใช้งาน - สามารถเริ่มการสอบได้
                 </Alert>
               )}
             </Paper>
@@ -2117,44 +2396,124 @@ function solution() {
               />
             </Box>
 
-            {/* Face detection info */}
+            {/* System readiness status */}
             <Box sx={{ mb: 2 }}>
               <Typography variant="body2" gutterBottom>
-                {t("proctoring.face_detection")}
+                สถานะระบบตรวจสอบ
               </Typography>
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 1 }}>
                 <Chip
                   size="small"
                   label={
-                    faceDetectionStatus.detected
-                      ? `✅ ตรวจพบ (${Math.round(
-                          faceDetectionStatus.confidence * 100
-                        )}%)`
-                      : "❌ ไม่พบใบหน้า"
+                    systemReadyStatus.camera
+                      ? "📹 กล้องพร้อม"
+                      : "📹 กล้องไม่พร้อม"
                   }
-                  color={faceDetectionStatus.detected ? "success" : "error"}
+                  color={systemReadyStatus.camera ? "success" : "error"}
                   variant="outlined"
                 />
                 <Chip
                   size="small"
                   label={
-                    faceDetectionStatus.verified
-                      ? "🔐 ยืนยันแล้ว"
-                      : "🔓 ยังไม่ยืนยัน"
+                    faceDetectionChecking
+                      ? `🔍 ตรวจสอบใบหน้า... (${faceDetectionAttempts}/10)`
+                      : systemReadyStatus.faceDetection
+                      ? "✅ ตรวจพบใบหน้า"
+                      : "❌ ไม่พบใบหน้า"
                   }
-                  color={faceDetectionStatus.verified ? "success" : "warning"}
+                  color={
+                    faceDetectionChecking
+                      ? "info"
+                      : systemReadyStatus.faceDetection
+                      ? "success"
+                      : "error"
+                  }
+                  variant="outlined"
+                />
+                <Chip
+                  size="small"
+                  label={
+                    systemReadyStatus.systemReady
+                      ? "🟢 ระบบพร้อม"
+                      : "🔴 ระบบไม่พร้อม"
+                  }
+                  color={systemReadyStatus.systemReady ? "success" : "error"}
                   variant="outlined"
                 />
               </Box>
-              {webcamReady && (
+
+              {/* Live face detection status (during exam) */}
+              {systemReadyStatus.systemReady && (
+                <Box
+                  sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 1 }}
+                >
+                  <Chip
+                    size="small"
+                    label={
+                      faceDetectionStatus.detected
+                        ? `✅ ตรวจพบ (${Math.round(
+                            faceDetectionStatus.confidence * 100
+                          )}%)`
+                        : "❌ ไม่พบใบหน้า"
+                    }
+                    color={faceDetectionStatus.detected ? "success" : "error"}
+                    variant="outlined"
+                  />
+                  <Chip
+                    size="small"
+                    label={
+                      faceDetectionStatus.verified
+                        ? "🔐 ยืนยันแล้ว"
+                        : "🔓 ยังไม่ยืนยัน"
+                    }
+                    color={faceDetectionStatus.verified ? "success" : "warning"}
+                    variant="outlined"
+                  />
+                </Box>
+              )}
+
+              {systemReadyStatus.camera &&
+                !systemReadyStatus.faceDetection &&
+                !faceDetectionChecking && (
+                  <Typography
+                    variant="caption"
+                    display="block"
+                    color="warning.main"
+                  >
+                    💡 กรุณาปรับตำแหน่งใบหน้าให้อยู่ตรงกล้องเพื่อเริ่มการสอบ
+                  </Typography>
+                )}
+
+              {systemReadyStatus.systemReady && (
                 <Typography
                   variant="caption"
                   display="block"
                   color="success.main"
                 >
-                  📹 กล้องพร้อมใช้งาน - Face Detection กำลังทำงาน
+                  📹 ระบบตรวจสอบพร้อมใช้งาน - การตรวจจับใบหน้าทำงานปกติ
                 </Typography>
               )}
+
+              {faceDetectionChecking && (
+                <Typography variant="caption" display="block" color="info.main">
+                  🔍 กำลังทดสอบการตรวจจับใบหน้า กรุณารอสักครู่...
+                </Typography>
+              )}
+
+              {/* Manual retry button */}
+              {systemReadyStatus.camera &&
+                !systemReadyStatus.faceDetection &&
+                !faceDetectionChecking && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="primary"
+                    onClick={performFaceDetectionPreCheck}
+                    sx={{ mt: 1 }}
+                  >
+                    🔍 ทดสอบการตรวจจับใบหน้าใหม่
+                  </Button>
+                )}
             </Box>
 
             {/* OpenCV Detection Panel */}
@@ -2631,21 +2990,21 @@ function solution() {
                       sx={{ fontWeight: "bold", mb: 1 }}
                     >
                       🔍 Warning Tracker:
-                      {showWarningTracker ? (
+                      {/* {showWarningTracker ? (
                         <Chip
                           size="small"
                           label="แสดงใน Popup"
                           color="warning"
                           sx={{ ml: 1 }}
                         />
-                      ) : (
-                        <Chip
-                          size="small"
-                          label="ไม่มีกิจกรรมน่าสงสัย"
-                          color="success"
-                          sx={{ ml: 1 }}
-                        />
-                      )}
+                      ) : ( */}
+                      <Chip
+                        size="small"
+                        label="ปิดการใช้งาน Modal"
+                        color="default"
+                        sx={{ ml: 1 }}
+                      />
+                      {/* )} */}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       ระบบติดตามแบบ Real-time
@@ -2755,8 +3114,8 @@ function solution() {
         </DialogActions>
       </Dialog>
 
-      {/* Cheat Warning Modal */}
-      <Dialog
+      {/* Cheat Warning Modal - COMMENTED OUT */}
+      {/* <Dialog
         open={showCheatWarning}
         disableEscapeKeyDown
         maxWidth="sm"
@@ -2842,10 +3201,10 @@ function solution() {
             {t("cheat_warning.continue_button")}
           </Button>
         </DialogActions>
-      </Dialog>
+      </Dialog> */}
 
-      {/* Warning Tracker Popup Modal */}
-      <Dialog
+      {/* Warning Tracker Popup Modal - COMMENTED OUT */}
+      {/* <Dialog
         open={showWarningTracker}
         disableEscapeKeyDown={false}
         maxWidth="sm"
@@ -3005,7 +3364,7 @@ function solution() {
             </Typography>
           </Box>
         </DialogContent>
-      </Dialog>
+      </Dialog> */}
     </Box>
   );
 };
