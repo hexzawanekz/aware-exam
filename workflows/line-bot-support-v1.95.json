@@ -1,0 +1,415 @@
+{
+    "meta": {
+        "instanceId": "n8n-local"
+    },
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "line-webhook",
+                "responseMode": "responseNode"
+            },
+            "id": "d4b5c1f0-1234-4567-8901-234567890123",
+            "name": "LINE Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                200,
+                300
+            ],
+            "webhookId": "webhook-line"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "leftValue": "",
+                        "caseSensitive": true,
+                        "typeValidation": "strict"
+                    },
+                    "conditions": [
+                        {
+                            "id": "condition1",
+                            "leftValue": "={{ $json.events?.[0]?.type }}",
+                            "rightValue": "message",
+                            "operator": {
+                                "type": "string",
+                                "operation": "equals"
+                            }
+                        },
+                        {
+                            "id": "condition2",
+                            "leftValue": "={{ $json.events?.[0]?.message?.text }}",
+                            "rightValue": "@support",
+                            "operator": {
+                                "type": "string",
+                                "operation": "contains"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                }
+            },
+            "id": "f1e2d3c4-5678-9012-3456-789012345678",
+            "name": "Filter Support Mentions",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                420,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Extract customer data and message details\nconst events = $input.first().json.events || [];\nif (events.length === 0) {\n  return { error: 'No events found' };\n}\n\nconst event = events[0];\nconst userId = event.source?.userId || 'unknown';\nconst messageText = event.message?.text || '';\nconst messageId = event.message?.id || Date.now().toString();\nconst timestamp = new Date(event.timestamp || Date.now()).toISOString();\n\n// Check if message has image\nconst hasImage = event.message?.type === 'image';\nconst imageId = hasImage ? event.message.id : null;\n\n// Extract issue details using simple text processing\nfunction extractCategory(text) {\n  const lowerText = text.toLowerCase();\n  if (lowerText.includes('bug') || lowerText.includes('error') || lowerText.includes('ผิดพลาด')) return 'bug';\n  if (lowerText.includes('feature') || lowerText.includes('request') || lowerText.includes('ขอ')) return 'feature';\n  if (lowerText.includes('login') || lowerText.includes('password') || lowerText.includes('รหัสผ่าน')) return 'account';\n  return 'general';\n}\n\nconst issueData = {\n  userId: userId,\n  messageId: messageId,\n  originalText: messageText,\n  timestamp: timestamp,\n  hasImage: hasImage,\n  imageId: imageId,\n  urgency: messageText.toLowerCase().includes('urgent') || messageText.includes('เร่งด่วน') ? 'high' : 'normal',\n  category: extractCategory(messageText),\n  replyToken: event.replyToken || ''\n};\n\nreturn issueData;"
+            },
+            "id": "a1b2c3d4-9876-5432-1098-765432109876",
+            "name": "Extract Customer Data",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                640,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "boolean": [
+                        {
+                            "id": "hasImage",
+                            "value1": "={{ $json.hasImage }}",
+                            "value2": true
+                        }
+                    ]
+                }
+            },
+            "id": "e5f6g7h8-1111-2222-3333-444455556666",
+            "name": "Has Image?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                860,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "model": "text-embedding-3-small",
+                "input": "Customer Issue: {{ $json.originalText }} Category: {{ $json.category }} Urgency: {{ $json.urgency }}"
+            },
+            "id": "i9j0k1l2-7777-8888-9999-000011112222",
+            "name": "Create Text Embedding",
+            "type": "n8n-nodes-base.openAi",
+            "typeVersion": 1,
+            "position": [
+                860,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "url": "http://qdrant:6333/collections/agent_memory/points",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyContentType": "json",
+                "jsonBody": "={\n  \"points\": [\n    {\n      \"id\": {{ JSON.stringify($('Extract Customer Data').item.json.messageId) }},\n      \"vector\": {{ JSON.stringify($json.data[0].embedding) }},\n      \"payload\": {\n        \"userId\": {{ JSON.stringify($('Extract Customer Data').item.json.userId) }},\n        \"originalText\": {{ JSON.stringify($('Extract Customer Data').item.json.originalText) }},\n        \"category\": {{ JSON.stringify($('Extract Customer Data').item.json.category) }},\n        \"urgency\": {{ JSON.stringify($('Extract Customer Data').item.json.urgency) }},\n        \"timestamp\": {{ JSON.stringify($('Extract Customer Data').item.json.timestamp) }},\n        \"hasImage\": {{ $('Extract Customer Data').item.json.hasImage }},\n        \"type\": \"customer_issue\"\n      }\n    }\n  ]\n}",
+                "options": {
+                    "response": {
+                        "response": {
+                            "responseFormat": "autodetect"
+                        }
+                    }
+                }
+            },
+            "id": "m3n4o5p6-3333-4444-5555-666677778888",
+            "name": "Store in Qdrant",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1080,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "url": "http://qdrant:6333/collections/agent_memory/points/search",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyContentType": "json",
+                "jsonBody": "={\n  \"vector\": {{ JSON.stringify($('Create Text Embedding').item.json.data[0].embedding) }},\n  \"limit\": 3,\n  \"with_payload\": true,\n  \"filter\": {\n    \"must\": [\n      {\n        \"key\": \"type\",\n        \"match\": {\n          \"value\": \"customer_issue\"\n        }\n      }\n    ]\n  }\n}",
+                "options": {
+                    "response": {
+                        "response": {
+                            "responseFormat": "autodetect"
+                        }
+                    }
+                }
+            },
+            "id": "q7r8s9t0-9999-0000-1111-222233334444",
+            "name": "Search Similar Issues",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1300,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Simulate Gemini AI analysis\nconst customerData = $('Extract Customer Data').item.json;\nconst similarIssues = $input.first().json.result || [];\n\n// Simple AI simulation based on keywords and patterns\nfunction analyzeIssue(text, category, similarCount) {\n  const lowerText = text.toLowerCase();\n  \n  // Determine priority\n  let priority = 'Normal';\n  if (lowerText.includes('urgent') || lowerText.includes('เร่งด่วน') || lowerText.includes('ด่วน')) {\n    priority = 'Urgent';\n  } else if (lowerText.includes('critical') || lowerText.includes('ล่ม') || lowerText.includes('ไม่ทำงาน')) {\n    priority = 'High';\n  } else if (lowerText.includes('minor') || lowerText.includes('เล็กน้อย')) {\n    priority = 'Low';\n  }\n  \n  // Determine assignee type\n  let assigneeType = 'backend';\n  if (lowerText.includes('ui') || lowerText.includes('design') || lowerText.includes('หน้าตา')) {\n    assigneeType = 'frontend';\n  } else if (lowerText.includes('server') || lowerText.includes('database') || lowerText.includes('api')) {\n    assigneeType = 'backend';\n  } else if (lowerText.includes('deploy') || lowerText.includes('server') || lowerText.includes('infrastructure')) {\n    assigneeType = 'devops';\n  } else if (lowerText.includes('test') || lowerText.includes('ทดสอบ')) {\n    assigneeType = 'qa';\n  }\n  \n  // Generate summary\n  const summary = `${category.charAt(0).toUpperCase() + category.slice(1)} issue: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`;\n  \n  // Generate steps\n  const steps = [\n    'Analyze the reported issue',\n    'Reproduce the problem if possible',\n    'Investigate root cause',\n    'Implement fix or solution',\n    'Test the resolution',\n    'Update customer with resolution'\n  ];\n  \n  // Estimate hours based on priority and complexity\n  let estimatedHours = 4;\n  if (priority === 'Urgent') estimatedHours = 2;\n  if (priority === 'High') estimatedHours = 3;\n  if (priority === 'Low') estimatedHours = 6;\n  if (similarCount > 0) estimatedHours = Math.max(1, estimatedHours - 1); // Reduce if similar issues exist\n  \n  return {\n    summary: summary,\n    priority: priority,\n    assignee_type: assigneeType,\n    steps: steps,\n    estimated_hours: estimatedHours,\n    tags: [category, assigneeType]\n  };\n}\n\nconst analysis = analyzeIssue(\n  customerData.originalText,\n  customerData.category,\n  similarIssues.length\n);\n\n// Format as expected by next node\nreturn {\n  text: JSON.stringify(analysis)\n};"
+            },
+            "id": "u1v2w3x4-5555-6666-7777-888899990000",
+            "name": "AI Analysis (Simulated)",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1520,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Parse AI response and prepare Redmine issue data\nconst aiResponse = JSON.parse($input.first().json.text);\nconst customerData = $('Extract Customer Data').item.json;\nconst hasImage = customerData.hasImage;\n\n// Map assignee type to actual developer\nconst assigneeMap = {\n  'frontend': 'john.doe',\n  'backend': 'jane.smith', \n  'devops': 'mike.wilson',\n  'qa': 'sarah.jones'\n};\n\nconst assignee = assigneeMap[aiResponse.assignee_type] || 'john.doe';\n\n// Priority mapping\nfunction getPriorityId(priority) {\n  const priorityMap = {\n    'Low': 1,\n    'Normal': 2, \n    'High': 3,\n    'Urgent': 4\n  };\n  return priorityMap[priority] || 2;\n}\n\n// User ID mapping (mock data - replace with actual IDs)\nfunction getAssigneeId(username) {\n  const userMap = {\n    'john.doe': 1,\n    'jane.smith': 2,\n    'mike.wilson': 3,\n    'sarah.jones': 4\n  };\n  return userMap[username] || 1;\n}\n\n// Prepare Redmine issue payload\nconst redmineIssue = {\n  issue: {\n    project_id: 1, // Replace with your project ID\n    subject: `[LINE Support] ${aiResponse.summary}`,\n    description: `**Customer Issue:**\\n${customerData.originalText}\\n\\n**AI Analysis:**\\n${aiResponse.summary}\\n\\n**Recommended Steps:**\\n${aiResponse.steps.map((step, i) => `${i+1}. ${step}`).join('\\n')}\\n\\n**Customer ID:** ${customerData.userId}\\n**Timestamp:** ${customerData.timestamp}\\n**Category:** ${customerData.category}`,\n    priority_id: getPriorityId(aiResponse.priority),\n    assigned_to_id: getAssigneeId(assignee),\n    estimated_hours: aiResponse.estimated_hours\n  }\n};\n\nreturn {\n  redminePayload: redmineIssue,\n  assigneeName: assignee,\n  priority: aiResponse.priority,\n  summary: aiResponse.summary,\n  hasImage: hasImage,\n  estimatedHours: aiResponse.estimated_hours\n};"
+            },
+            "id": "y5z6a7b8-1111-2222-3333-444455556666",
+            "name": "Prepare Redmine Issue",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1740,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Mock Redmine API response\nconst redmineData = $input.first().json;\nconst timestamp = Date.now();\n\n// Simulate successful issue creation\nconst mockResponse = {\n  issue: {\n    id: Math.floor(Math.random() * 10000) + 1000, // Random issue ID\n    subject: redmineData.redminePayload.issue.subject,\n    description: redmineData.redminePayload.issue.description,\n    priority_id: redmineData.redminePayload.issue.priority_id,\n    assigned_to_id: redmineData.redminePayload.issue.assigned_to_id,\n    created_on: new Date().toISOString(),\n    updated_on: new Date().toISOString()\n  }\n};\n\nconsole.log('Mock Redmine Issue Created:', mockResponse);\n\nreturn mockResponse;"
+            },
+            "id": "c9d0e1f2-7777-8888-9999-000011112222",
+            "name": "Mock Redmine Creation",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1960,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Prepare Teams message\nconst issueData = $input.first().json.issue;\nconst redmineData = $('Prepare Redmine Issue').item.json;\nconst customerData = $('Extract Customer Data').item.json;\n\n// Create rich Teams message card\nconst teamsMessage = {\n  \"@type\": \"MessageCard\",\n  \"@context\": \"https://schema.org/extensions\",\n  \"summary\": `New support issue assigned: ${redmineData.summary}`,\n  \"themeColor\": getPriorityColor(redmineData.priority),\n  \"sections\": [\n    {\n      \"activityTitle\": \"🎫 New Support Issue Assigned\",\n      \"activitySubtitle\": `Priority: ${redmineData.priority}`,\n      \"facts\": [\n        {\n          \"name\": \"Issue ID:\",\n          \"value\": `#${issueData.id}`\n        },\n        {\n          \"name\": \"Customer:\",\n          \"value\": customerData.userId\n        },\n        {\n          \"name\": \"Category:\",\n          \"value\": customerData.category\n        },\n        {\n          \"name\": \"Priority:\",\n          \"value\": redmineData.priority\n        },\n        {\n          \"name\": \"Assigned to:\", \n          \"value\": redmineData.assigneeName\n        },\n        {\n          \"name\": \"Estimated Hours:\",\n          \"value\": redmineData.estimatedHours.toString()\n        }\n      ],\n      \"text\": `**Original Message:**\\n${customerData.originalText}\\n\\n**AI Summary:**\\n${redmineData.summary}`\n    }\n  ],\n  \"potentialAction\": [\n    {\n      \"@type\": \"OpenUri\",\n      \"name\": \"View Issue (Mock)\",\n      \"targets\": [\n        {\n          \"os\": \"default\",\n          \"uri\": `https://your-redmine.company.com/issues/${issueData.id}`\n        }\n      ]\n    }\n  ]\n};\n\nfunction getPriorityColor(priority) {\n  const colorMap = {\n    'Low': '28a745',\n    'Normal': '007bff', \n    'High': 'ffc107',\n    'Urgent': 'dc3545'\n  };\n  return colorMap[priority] || '007bff';\n}\n\nreturn {\n  teamsPayload: teamsMessage,\n  assigneeName: redmineData.assigneeName\n};"
+            },
+            "id": "g3h4i5j6-3333-4444-5555-666677778888",
+            "name": "Prepare Teams Message",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2180,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Mock Teams notification\nconst teamsData = $input.first().json;\n\nconsole.log('Mock Teams Notification Sent:', {\n  assignee: teamsData.assigneeName,\n  message: 'Teams notification would be sent here'\n});\n\n// Simulate successful Teams notification\nreturn {\n  success: true,\n  message: 'Teams notification sent successfully',\n  assignee: teamsData.assigneeName\n};"
+            },
+            "id": "k7l8m9n0-9999-0000-1111-222233334444",
+            "name": "Mock Teams Notification",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2400,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Mock LINE reply\nconst customerData = $('Extract Customer Data').item.json;\nconst issueData = $('Mock Redmine Creation').item.json.issue;\nconst redmineData = $('Prepare Redmine Issue').item.json;\n\nconst replyMessage = {\n  replyToken: customerData.replyToken,\n  messages: [\n    {\n      type: 'text',\n      text: `🎫 ขอบคุณที่แจ้งปัญหา! เราได้สร้างตั๋วแล้ว\\n\\n📋 Ticket ID: #${issueData.id}\\n⏰ คาดว่าจะแก้ไขภายใน ${redmineData.estimatedHours} ชั่วโมง\\n👨‍💻 มอบหมายให้: ${redmineData.assigneeName}\\n\\nทีมงานจะติดต่อกลับในเร็วๆ นี้`\n    }\n  ]\n};\n\nconsole.log('Mock LINE Reply:', replyMessage);\n\nreturn {\n  success: true,\n  message: 'Reply sent to customer',\n  ticketId: issueData.id\n};"
+            },
+            "id": "o1p2q3r4-5555-6666-7777-888899990000",
+            "name": "Mock Reply to Customer",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2620,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n  \"success\": true,\n  \"message\": \"Issue processed successfully\",\n  \"ticketId\": {{ JSON.stringify($('Mock Redmine Creation').item.json.issue.id) }},\n  \"assignee\": {{ JSON.stringify($('Prepare Redmine Issue').item.json.assigneeName) }}\n}"
+            },
+            "id": "s5t6u7v8-1111-2222-3333-444455556666",
+            "name": "Respond OK",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                2840,
+                400
+            ]
+        }
+    ],
+    "connections": {
+        "LINE Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Filter Support Mentions",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Filter Support Mentions": {
+            "main": [
+                [
+                    {
+                        "node": "Extract Customer Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extract Customer Data": {
+            "main": [
+                [
+                    {
+                        "node": "Has Image?",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Create Text Embedding",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Create Text Embedding": {
+            "main": [
+                [
+                    {
+                        "node": "Store in Qdrant",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Store in Qdrant": {
+            "main": [
+                [
+                    {
+                        "node": "Search Similar Issues",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Search Similar Issues": {
+            "main": [
+                [
+                    {
+                        "node": "AI Analysis (Simulated)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "AI Analysis (Simulated)": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Redmine Issue",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Redmine Issue": {
+            "main": [
+                [
+                    {
+                        "node": "Mock Redmine Creation",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Mock Redmine Creation": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Teams Message",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Teams Message": {
+            "main": [
+                [
+                    {
+                        "node": "Mock Teams Notification",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Mock Teams Notification": {
+            "main": [
+                [
+                    {
+                        "node": "Mock Reply to Customer",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Mock Reply to Customer": {
+            "main": [
+                [
+                    {
+                        "node": "Respond OK",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {},
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "staticData": null,
+    "tags": [],
+    "triggerCount": 0,
+    "updatedAt": "2024-06-07T04:30:00.000Z",
+    "versionId": "1"
+}
